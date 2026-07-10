@@ -7,15 +7,19 @@ on:
     - cron: '0 6,10,14,18 * * *'
   workflow_dispatch:   # per lanciarlo a mano dal tab "Actions"
 
+# Serve per far ri-salvare stato.json nel repo (per la freccia di tendenza).
+permissions:
+  contents: write
+
 jobs:
   bollettino:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout del repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Installa Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -28,3 +32,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bollettino.py
+
+      - name: Salva lo stato per la prossima esecuzione
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add stato.json
+          git diff --staged --quiet || git commit -m "Aggiorna stato AQI [skip ci]"
+          git push

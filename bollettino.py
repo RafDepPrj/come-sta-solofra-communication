@@ -40,6 +40,20 @@ POLLUTANTS = {
     "pm25": "PM2.5", "pm10": "PM10", "no2": "NO\u2082",
     "so2": "SO\u2082", "co": "CO", "o3": "O\u2083",
 }
+
+# Traduzione in linguaggio semplice + icona di categoria, per rendere
+# comprensibile "quale inquinante è più alto ora" senza dover conoscere le
+# sigle tecniche. Mostrata sempre, con parole semplici — non è un giudizio
+# di gravità (quello lo dice già la fascia colorata sopra).
+CAUSA_PROBABILE = {
+    "pm25": ("\U0001F697", "traffico e riscaldamento"),
+    "pm10": ("\U0001F32B\ufe0f", "polveri diffuse (traffico, cantieri)"),
+    "no2":  ("\U0001F697", "traffico veicolare"),
+    "so2":  ("\U0001F3ED", "attività industriali"),
+    "co":   ("\U0001F697", "traffico e combustione"),
+    "o3":   ("\u2600\ufe0f", "sole e caldo"),
+}
+
 GIORNI = ["lunedì", "martedì", "mercoledì", "giovedì",
           "venerdì", "sabato", "domenica"]
 MESI = ["", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
@@ -191,6 +205,28 @@ def posizione(solofra_aqi, nearby):
     return valori.index(solofra_aqi) + 1, len(valori)
 
 
+def riga_contesto(data):
+    """Meteo + UV + previsione di domani, compressi in un'unica riga.
+    Sempre presente, ma un solo rigo — mai tre righe separate."""
+    iaqi = data.get("iaqi", {})
+    pezzi = []
+
+    t = to_int((iaqi.get("t") or {}).get("v"))
+    if t is not None:
+        pezzi.append(f"{t}\u00b0C")
+
+    uv = uv_oggi(data)
+    if uv is not None:
+        pezzi.append(f"UV {uv_label(uv)}")
+
+    dom = previsione_domani(data)
+    if dom is not None:
+        bd = banda(dom)
+        pezzi.append(f"domani {bd['emoji']} {bd['label'].lower()}")
+
+    return " \u00b7 ".join(pezzi)
+
+
 def meteo_str(data):
     iaqi = data.get("iaqi", {})
     pezzi = []
@@ -247,52 +283,41 @@ def tendenza(corrente, precedente, soglia=3):
 # --- Didascalia -------------------------------------------------------------
 
 def build_caption(data, nearby, trend=None):
+    """Ogni riga deve guadagnarsi il posto: solo ciò che aiuta a capire o
+    decidere, niente paragrafi. Struttura fissa, sempre le stesse 7-8 righe
+    corte — la lunghezza non varia, cambia solo cosa dicono le righe."""
     aqi = to_int(data.get("aqi"))
     b = banda(aqi)
-    data_it, ora = etichette_tempo()
+    _, ora = etichette_tempo()
     aqi_txt = str(aqi) if aqi is not None else "n/d"
 
-    righe = [
-        f"{b['emoji']} <b>Come sta Solofra</b> \u2014 {data_it}, ore {ora}\n",
-        f"<b>Qualità dell'aria: {b['label']}</b> (AQI {aqi_txt})",
-        b["advice"],
-    ]
+    righe = [f"{b['emoji']} <b>Come sta Solofra</b> \u2014 ore {ora}",
+            f"<b>AQI {aqi_txt} \u2014 {b['label']}</b>",
+            b["advice"]]
 
-    extra = []
     if trend:
-        extra.append(f"{trend['freccia']} {trend['testo'].capitalize()} "
-                     f"rispetto al post precedente ({trend['delta']:+d}).")
+        righe.append(f"{trend['freccia']} {trend['testo'].capitalize()}"
+                     f" rispetto al post precedente")
 
-    pos = posizione(aqi, nearby)
-    if pos:
-        p, tot = pos
-        if p == 1:
-            extra.append("\U0001F3C6 Oggi è la zona più pulita tra le "
-                         "stazioni vicine.")
-        else:
-            extra.append(f"\U0001F4CA Oggi è {p}\u00aa su {tot} nella zona "
-                         "(dalla più pulita).")
+    # Causa probabile, sempre presente ma in linguaggio semplice — mai la
+    # sigla tecnica da sola, sempre con l'icona di categoria.
+    dom = data.get("dominentpol") or ""
+    if dom in CAUSA_PROBABILE:
+        icona, causa = CAUSA_PROBABILE[dom]
+        righe.append(f"{icona} Legato soprattutto a: {causa}")
 
-    dom = previsione_domani(data)
-    if dom is not None:
-        bd = banda(dom)
-        extra.append(f"\U0001F52E Domani: previsto {bd['label'].lower()} "
-                     f"{bd['emoji']}")
+    if nearby:
+        confronto = " \u00b7 ".join(
+            f"{banda(v['aqi'])['emoji']} {v['nome']} {v['aqi']}"
+            for v in nearby[:4]
+        )
+        righe.append(f"\U0001F4CD {confronto}")
 
-    uv = uv_oggi(data)
-    if uv is not None:
-        extra.append(f"\u2600\ufe0f Indice UV oggi: {uv} ({uv_label(uv)})")
+    contesto = riga_contesto(data)
+    if contesto:
+        righe.append(f"\U0001F321\ufe0f {contesto}")
 
-    meteo = meteo_str(data)
-    if meteo:
-        extra.append(f"\U0001F321\ufe0f {meteo}")
-
-    if extra:
-        righe.append("\n" + "\n".join(extra))
-
-    righe.append(f"\n\U0001F517 Dettagli e storico: {PAGINA_STAZIONE}")
-    righe.append("\n<i>Dati: World Air Quality Index Project \u00b7 ARPA "
-                 "Campania. Dati grezzi non validati, a scopo informativo.</i>")
+    righe.append(f"Dettagli: {PAGINA_STAZIONE}")
     return "\n".join(righe)
 
 
@@ -323,6 +348,23 @@ def _wrap(draw, text, font, max_w):
     return righe
 
 
+POLLUTANT_ORDER = ["pm25", "pm10", "no2", "so2", "co", "o3"]
+
+
+def sub_indici(data):
+    """Lista ordinata (chiave, etichetta, valore) per gli inquinanti con
+    una lettura valida in questo momento."""
+    iaqi = data.get("iaqi", {})
+    righe = []
+    for k in POLLUTANT_ORDER:
+        cell = iaqi.get(k)
+        if cell and "v" in cell:
+            v = to_int(cell["v"])
+            if v is not None:
+                righe.append((k, POLLUTANTS[k], v))
+    return righe
+
+
 def _barra_aqi(d, x, y, w, h, aqi):
     """Barra orizzontale a gradiente con marcatore sul valore corrente."""
     segmenti = [(50, (46, 158, 79)), (100, (224, 168, 0)),
@@ -347,106 +389,96 @@ def _barra_aqi(d, x, y, w, h, aqi):
 
 
 def crea_immagine(data, nearby, out_path="card.png", trend=None):
+    """Card minimale: solo ciò che serve per un colpo d'occhio.
+    Il dettaglio per inquinante, meteo e UV vivono nella pagina dashboard,
+    non nel post ricorrente — qui contano solo numero, colore, una frase,
+    tendenza e il confronto coi comuni vicini."""
     W, BG = 1080, (245, 247, 250)
     GREY, DARK = (110, 118, 128), (35, 40, 46)
 
     aqi = to_int(data.get("aqi"))
     b = banda(aqi)
-    data_it, ora = etichette_tempo()
-    dom = data.get("dominentpol") or ""
-    dom_label = POLLUTANTS.get(dom, dom.upper() if dom else "n/d")
+    _, ora = etichette_tempo()
 
-    img = Image.new("RGB", (W, 1800), BG)
+    img = Image.new("RGB", (W, 1300), BG)
     d = ImageDraw.Draw(img)
 
     d.rectangle([0, 0, W, 14], fill=b["color"])
-    d.text((60, 58), "COME STA SOLOFRA", font=_font(56, bold=True), fill=DARK)
-    d.text((60, 136), f"Aggiornato {data_it}, ore {ora}",
-           font=_font(30), fill=GREY)
-    if trend:
-        d.text((60, 182),
-               f"{trend['freccia']} {trend['testo'].capitalize()} "
-               f"({trend['delta']:+d})",
-               font=_font(30, bold=True), fill=trend["color"])
+    d.text((60, 50), "COME STA SOLOFRA", font=_font(38, bold=True), fill=GREY)
+    d.text((W - 60, 50), f"ore {ora}", font=_font(38), fill=GREY, anchor="ra")
 
-    # Cerchio semaforo
-    cx, cy, r = W // 2, 388, 148
+    # Cerchio semaforo — l'elemento dominante della card
+    cx, cy, r = W // 2, 330, 190
     d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=b["color"])
     aqi_str = str(aqi) if aqi is not None else "--"
-    fnum = _font(150 if len(aqi_str) <= 2 else 116, bold=True)
+    fnum = _font(190 if len(aqi_str) <= 2 else 150, bold=True)
     tb = d.textbbox((0, 0), aqi_str, font=fnum)
-    d.text((cx - (tb[2] - tb[0]) / 2, cy - (tb[3] - tb[1]) / 2 - tb[1]),
+    d.text((cx - (tb[2] - tb[0]) / 2, cy - (tb[3] - tb[1]) / 2 - tb[1] - 16),
            aqi_str, font=fnum, fill=b["text"])
-    d.text((cx, cy + r - 32), "AQI", font=_font(26, bold=True),
+    d.text((cx, cy + r - 44), "AQI", font=_font(30, bold=True),
            fill=b["text"], anchor="mm")
 
-    # Pill etichetta fascia
-    y = cy + r + 34
-    fl = _font(42, bold=True)
-    lw = d.textlength(b["label"], font=fl)
-    d.rounded_rectangle([cx - lw / 2 - 30, y, cx + lw / 2 + 30, y + 64],
-                        radius=32, fill=b["color"])
-    d.text((cx, y + 32), b["label"], font=fl, fill=b["text"], anchor="mm")
-    y += 96
+    y = cy + r + 36
+    fl = _font(52, bold=True)
+    d.text((cx, y), b["label"], font=fl, fill=b["color"], anchor="ma")
+    y += 76
 
-    # Barra a gradiente
-    _barra_aqi(d, 140, y, W - 280, 26, aqi)
-    y += 74
+    if trend:
+        d.text((cx, y), f"{trend['freccia']} {trend['testo'].capitalize()}",
+               font=_font(32, bold=True), fill=trend["color"], anchor="ma")
+        y += 50
 
-    d.text((cx, y), f"Inquinante principale: {dom_label}",
-           font=_font(30), fill=GREY, anchor="ma")
-    y += 60
-
-    for riga in _wrap(d, b["advice"], _font(34), W - 180):
-        d.text((cx, y), riga, font=_font(34), fill=DARK, anchor="ma")
-        y += 46
-
-    meteo = meteo_str(data)
-    uv = uv_oggi(data)
-    riga_meteo = meteo
-    if uv is not None:
-        riga_meteo += (" \u00b7 " if riga_meteo else "") + \
-            f"UV {uv} ({uv_label(uv)})"
-    if riga_meteo:
-        y += 12
-        d.text((cx, y), riga_meteo, font=_font(28), fill=GREY, anchor="ma")
-        y += 44
+    y += 14
+    for riga in _wrap(d, b["advice"], _font(32), W - 200):
+        d.text((cx, y), riga, font=_font(32), fill=DARK, anchor="ma")
+        y += 42
     y += 20
 
-    d.line([60, y, W - 60, y], fill=(225, 229, 234), width=2)
-    y += 32
+    # Causa probabile, sempre presente, tradotta in linguaggio semplice.
+    dom = data.get("dominentpol") or ""
+    if dom in CAUSA_PROBABILE:
+        icona, causa = CAUSA_PROBABILE[dom]
+        d.text((cx, y), f"{icona} Legato soprattutto a: {causa}",
+               font=_font(27), fill=GREY, anchor="ma")
+        y += 40
+    y += 20
 
-    d.text((60, y), "COMUNI VICINI", font=_font(34, bold=True), fill=DARK)
+    d.line([80, y, W - 80, y], fill=(225, 229, 234), width=2)
+    y += 34
+
+    # Comuni vicini: solo la riga essenziale, un pallino colore + numero
     pos = posizione(aqi, nearby)
-    if pos:
-        testo_pos = ("Solofra la più pulita" if pos[0] == 1
-                     else f"Solofra {pos[0]}\u00aa su {pos[1]}")
-        d.text((W - 60, y + 6), testo_pos, font=_font(26, bold=True),
+    header = "COMUNI VICINI"
+    d.text((60, y), header, font=_font(28, bold=True), fill=DARK)
+    if pos and pos[0] == 1:
+        d.text((W - 60, y), "Solofra è la più pulita", font=_font(24, bold=True),
                fill=b["color"], anchor="ra")
-    y += 64
+    y += 50
 
     if nearby:
-        for v in nearby:
+        for v in nearby[:4]:
             vb = banda(v["aqi"])
-            d.ellipse([64, y + 6, 92, y + 34], fill=vb["color"])
-            d.text((116, y), v["nome"], font=_font(34), fill=DARK)
-            d.text((W - 64, y), str(v["aqi"]), font=_font(34, bold=True),
+            d.ellipse([64, y + 4, 88, y + 28], fill=vb["color"])
+            d.text((104, y), v["nome"], font=_font(28), fill=DARK)
+            d.text((W - 60, y), str(v["aqi"]), font=_font(28, bold=True),
                    fill=vb["color"], anchor="ra")
-            y += 56
-    else:
-        d.text((116, y), "Dati dei comuni vicini non disponibili ora.",
-               font=_font(30), fill=GREY)
-        y += 56
-    y += 16
-
-    d.line([60, y, W - 60, y], fill=(225, 229, 234), width=2)
-    y += 24
-    footer = ("Dati: World Air Quality Index Project - ARPA Campania. "
-              "Dati grezzi non validati, a solo scopo informativo.")
-    for riga in _wrap(d, footer, _font(24), W - 120):
-        d.text((60, y), riga, font=_font(24), fill=GREY)
-        y += 32
+            y += 44
     y += 20
+
+    # Contesto: meteo + UV + previsione di domani, in un'unica riga.
+    contesto = riga_contesto(data)
+    if contesto:
+        d.line([80, y, W - 80, y], fill=(225, 229, 234), width=2)
+        y += 30
+        d.text((cx, y), contesto, font=_font(27), fill=DARK, anchor="ma")
+        y += 40
+    y += 10
+
+    d.line([80, y, W - 80, y], fill=(225, 229, 234), width=2)
+    y += 22
+    d.text((cx, y), "Fonte: ARPA Campania · World Air Quality Index Project",
+           font=_font(20), fill=GREY, anchor="ma")
+    y += 34
 
     img = img.crop((0, 0, W, y))
     img.save(out_path)

@@ -1,0 +1,30 @@
+name: Bollettino aria Solofra
+
+on:
+  schedule:
+    # 4 volte al giorno. Orari in UTC: in Italia sono +1h (inverno) o +2h (estate).
+    # 06:00 UTC -> 07/08   10:00 UTC -> 11/12   14:00 UTC -> 15/16   18:00 UTC -> 19/20
+    - cron: '0 6,10,14,18 * * *'
+  workflow_dispatch:   # per lanciarlo a mano dal tab "Actions"
+
+jobs:
+  bollettino:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repository
+        uses: actions/checkout@v4
+
+      - name: Installa Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Installa dipendenze
+        run: pip install requests pillow
+
+      - name: Genera e invia il bollettino
+        env:
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bollettino.py

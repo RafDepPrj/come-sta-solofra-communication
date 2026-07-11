@@ -126,7 +126,10 @@ def fetch_solofra():
 
 
 def cerca_aqi(keyword):
-    """AQI del comune via ricerca per nome; None se non trovato/attivo."""
+    """AQI del comune via ricerca per nome; None se non c'è una stazione
+    il cui nome corrisponde davvero. NIENT'ALTRO: mai restituire il dato
+    di una stazione diversa spacciandolo per quella cercata — meglio "n/d"
+    che un dato falso attribuito al comune sbagliato."""
     try:
         resp = requests.get(SEARCH_URL,
                             params={"token": WAQI_TOKEN, "keyword": keyword},
@@ -137,7 +140,6 @@ def cerca_aqi(keyword):
             return None
         parole = [w for w in keyword.lower().split()
                   if len(w) > 3 and w not in ("san", "santa")]
-        ripiego = None
         for item in js.get("data", []):
             nome = (item.get("station") or {}).get("name", "").lower()
             aqi = to_int(item.get("aqi"))
@@ -145,9 +147,7 @@ def cerca_aqi(keyword):
                 continue
             if any(p in nome for p in parole):
                 return aqi
-            if ripiego is None:
-                ripiego = aqi
-        return ripiego
+        return None  # nessuna stazione con questo nome: non inventare un dato
     except requests.RequestException:
         return None
 
@@ -304,7 +304,7 @@ def build_caption(data, nearby, trend=None):
     dom = data.get("dominentpol") or ""
     if dom in CAUSA_PROBABILE:
         icona, causa = CAUSA_PROBABILE[dom]
-        righe.append(f"{icona} Legato soprattutto a: {causa}")
+        righe.append(f"{icona} Il motivo principale: {causa}")
 
     if nearby:
         confronto = " \u00b7 ".join(
@@ -366,7 +366,9 @@ def sub_indici(data):
 
 
 def _barra_aqi(d, x, y, w, h, aqi):
-    """Barra orizzontale a gradiente con marcatore sul valore corrente."""
+    """Barra orizzontale a gradiente con marcatore sul valore corrente.
+    Etichette in parole, non numeri tecnici: risponde a "il numero cosa
+    vuol dire?" mostrando subito dove si trova sulla scala pulito→pericoloso."""
     segmenti = [(50, (46, 158, 79)), (100, (224, 168, 0)),
                 (150, (233, 140, 20)), (200, (214, 64, 54)),
                 (300, (142, 68, 173))]
@@ -382,10 +384,11 @@ def _barra_aqi(d, x, y, w, h, aqi):
     mx = x + w * val / scala
     d.polygon([(mx - 13, y - 20), (mx + 13, y - 20), (mx, y - 3)],
               fill=(35, 40, 46))
-    # estremi
+    # etichette in parole, non "0"/"300+"
     g = (150, 150, 150)
-    d.text((x, y + h + 8), "0", font=_font(24), fill=g)
-    d.text((x + w, y + h + 8), "300+", font=_font(24), fill=g, anchor="ra")
+    d.text((x, y + h + 8), "aria pulita", font=_font(22), fill=g)
+    d.text((x + w, y + h + 8), "aria pericolosa", font=_font(22), fill=g,
+          anchor="ra")
 
 
 def crea_immagine(data, nearby, out_path="card.png", trend=None):
@@ -398,14 +401,16 @@ def crea_immagine(data, nearby, out_path="card.png", trend=None):
 
     aqi = to_int(data.get("aqi"))
     b = banda(aqi)
-    _, ora = etichette_tempo()
+    data_it, ora = etichette_tempo()
 
     img = Image.new("RGB", (W, 1300), BG)
     d = ImageDraw.Draw(img)
 
     d.rectangle([0, 0, W, 14], fill=b["color"])
     d.text((60, 50), "COME STA SOLOFRA", font=_font(38, bold=True), fill=GREY)
-    d.text((W - 60, 50), f"ore {ora}", font=_font(38), fill=GREY, anchor="ra")
+    d.text((W - 60, 44), f"ore {ora}", font=_font(34, bold=True), fill=GREY,
+          anchor="ra")
+    d.text((W - 60, 84), data_it, font=_font(24), fill=GREY, anchor="ra")
 
     # Cerchio semaforo — l'elemento dominante della card
     cx, cy, r = W // 2, 330, 190
@@ -421,7 +426,13 @@ def crea_immagine(data, nearby, out_path="card.png", trend=None):
     y = cy + r + 36
     fl = _font(52, bold=True)
     d.text((cx, y), b["label"], font=fl, fill=b["color"], anchor="ma")
-    y += 76
+    y += 72
+
+    # Barra di riferimento: risponde a "53 è tanto o poco?" in un'occhiata,
+    # senza dover leggere o capire la scala numerica.
+    y += 8
+    _barra_aqi(d, 140, y, W - 280, 22, aqi)
+    y += 60
 
     if trend:
         d.text((cx, y), f"{trend['freccia']} {trend['testo'].capitalize()}",
@@ -438,7 +449,7 @@ def crea_immagine(data, nearby, out_path="card.png", trend=None):
     dom = data.get("dominentpol") or ""
     if dom in CAUSA_PROBABILE:
         icona, causa = CAUSA_PROBABILE[dom]
-        d.text((cx, y), f"{icona} Legato soprattutto a: {causa}",
+        d.text((cx, y), f"{icona} Il motivo principale: {causa}",
                font=_font(27), fill=GREY, anchor="ma")
         y += 40
     y += 20
@@ -448,10 +459,10 @@ def crea_immagine(data, nearby, out_path="card.png", trend=None):
 
     # Comuni vicini: solo la riga essenziale, un pallino colore + numero
     pos = posizione(aqi, nearby)
-    header = "COMUNI VICINI"
-    d.text((60, y), header, font=_font(28, bold=True), fill=DARK)
+    d.text((60, y), "COME SIAMO RISPETTO AI VICINI",
+           font=_font(26, bold=True), fill=DARK)
     if pos and pos[0] == 1:
-        d.text((W - 60, y), "Solofra è la più pulita", font=_font(24, bold=True),
+        d.text((W - 60, y), "Solofra è la più pulita", font=_font(22, bold=True),
                fill=b["color"], anchor="ra")
     y += 50
 

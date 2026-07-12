@@ -249,20 +249,55 @@ def etichette_tempo():
 
 STATO_PATH = "stato.json"
 
+ORE_MINIME_TRA_POST = 4       # margine anti-rimbalzo tra due fasce vicine
+GIORNI_MAX_SILENZIO = 7        # oltre questo, un post "tutto ok" di controllo
 
-def leggi_stato_aqi():
-    """AQI dell'ultimo bollettino pubblicato; None se non c'e'."""
+
+def leggi_stato():
+    """Stato dell'ultimo bollettino PUBBLICATO (non ogni controllo)."""
     try:
         with open(STATO_PATH, encoding="utf-8") as f:
-            return to_int(json.load(f).get("aqi"))
+            s = json.load(f)
+        return {"aqi": to_int(s.get("aqi")), "banda": s.get("banda"),
+                "quando": s.get("quando")}
     except (FileNotFoundError, ValueError, OSError):
         return None
 
 
-def salva_stato_aqi(aqi):
+def salva_stato(aqi, banda_label):
     ora = datetime.now(ZoneInfo("Europe/Rome")).isoformat(timespec="minutes")
     with open(STATO_PATH, "w", encoding="utf-8") as f:
-        json.dump({"aqi": aqi, "iso": ora}, f)
+        json.dump({"aqi": aqi, "banda": banda_label, "quando": ora}, f)
+
+
+def valuta_se_pubblicare(aqi_corrente, stato):
+    """Decide se pubblicare ORA. Criterio: solo quando cambia la fascia
+    (non per piccole oscillazioni interne alla stessa fascia), con un
+    margine minimo tra un post e l'altro per evitare rimbalzi sul confine
+    tra due fasce. Se il canale resta silenzioso troppo a lungo, un post
+    di controllo anche senza variazioni — per non sembrare abbandonato."""
+    if stato is None or not stato.get("quando"):
+        return True, "primo post"
+
+    banda_corrente = banda(aqi_corrente)["label"]
+    try:
+        ultimo = datetime.fromisoformat(stato["quando"])
+        if ultimo.tzinfo is None:
+            ultimo = ultimo.replace(tzinfo=ZoneInfo("Europe/Rome"))
+    except ValueError:
+        return True, "stato illeggibile"
+
+    ore_trascorse = (datetime.now(ZoneInfo("Europe/Rome")) - ultimo) \
+        .total_seconds() / 3600
+
+    cambio_fascia = banda_corrente != stato.get("banda")
+    if cambio_fascia and ore_trascorse >= ORE_MINIME_TRA_POST:
+        return True, "cambio fascia"
+
+    if ore_trascorse >= GIORNI_MAX_SILENZIO * 24:
+        return True, "nessun aggiornamento da 7 giorni"
+
+    return False, None
 
 
 def tendenza(corrente, precedente, soglia=3):
@@ -278,6 +313,39 @@ def tendenza(corrente, precedente, soglia=3):
                 "delta": delta, "color": (214, 64, 54)}
     return {"freccia": "\u2198", "testo": "in miglioramento",
             "delta": delta, "color": (46, 158, 79)}
+
+
+# --- Storico per il riepilogo settimanale -----------------------------------
+
+STORICO_PATH = "storico.json"
+STORICO_GIORNI_RETENTION = 9  # un filo più di 7, per assorbire ritardi cron
+
+
+def registra_storico(aqi, banda_label, nearby):
+    """Aggiunge UN record ad ogni controllo (pubblichi o no il bollettino
+    giornaliero) — è la materia prima per il grafico di fine settimana.
+    Pota da sola i record più vecchi di STORICO_GIORNI_RETENTION giorni,
+    così il file non cresce all'infinito."""
+    try:
+        with open(STORICO_PATH, encoding="utf-8") as f:
+            record = json.load(f)
+    except (FileNotFoundError, ValueError, OSError):
+        record = []
+
+    ora = datetime.now(ZoneInfo("Europe/Rome"))
+    record.append({
+        "ts": ora.isoformat(timespec="minutes"),
+        "aqi": aqi,
+        "banda": banda_label,
+        "nearby": {v["nome"]: v["aqi"] for v in nearby} if nearby else {},
+    })
+
+    soglia = ora - timedelta(days=STORICO_GIORNI_RETENTION)
+    record = [r for r in record
+             if datetime.fromisoformat(r["ts"]) >= soglia]
+
+    with open(STORICO_PATH, "w", encoding="utf-8") as f:
+        json.dump(record, f, ensure_ascii=False, indent=1)
 
 
 # --- Didascalia -------------------------------------------------------------
@@ -513,10 +581,25 @@ def send_photo(path, caption):
 def main():
     check_env()
     data = fetch_solofra()
-    nearby = fetch_nearby()
     aqi = to_int(data.get("aqi"))
+    nearby = fetch_nearby()  # sempre: serve anche quando non pubblichiamo
 
-    precedente = leggi_stato_aqi()
+    # Registra SEMPRE questo controllo nello storico, a prescindere dal
+    # fatto che si pubblichi o meno — è la base dati per il riepilogo
+    # settimanale del lunedì.
+    registra_storico(aqi, banda(aqi)["label"], nearby)
+
+    stato = leggi_stato()
+    pubblica, motivo = valuta_se_pubblicare(aqi, stato)
+
+    if not pubblica:
+        fascia_ora = banda(aqi)["label"]
+        print(f"Nessuna pubblicazione: fascia invariata ({fascia_ora}), "
+             f"o troppo presto dall'ultimo post. Storico comunque aggiornato.")
+        return
+
+    print(f"Pubblico: {motivo}")
+    precedente = stato["aqi"] if stato else None
     trend = tendenza(aqi, precedente)
 
     caption = build_caption(data, nearby, trend)
@@ -526,9 +609,9 @@ def main():
     print("----------------------------")
     send_photo(path, caption)
 
-    # Salva il valore solo dopo un invio riuscito, per il confronto successivo.
+    # Salva lo stato solo dopo un invio riuscito, per il confronto successivo.
     if aqi is not None:
-        salva_stato_aqi(aqi)
+        salva_stato(aqi, banda(aqi)["label"])
 
 
 if __name__ == "__main__":

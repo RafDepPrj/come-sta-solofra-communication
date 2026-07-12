@@ -33,16 +33,21 @@ Lo script gira due volte al giorno (vedi workflow):
   - il venerdì mattina (~8:00 Roma): promemoria vetro, solo se è la
     settimana giusta
 
-Il servizio è dotato di un INTERRUTTORE (vedi funzione `abilitato()`): finché
-non viene attivato esplicitamente, lo script si limita a controllare ed
-uscire senza mandare nulla — così puoi caricare questi file oggi e
-accendere il servizio quando vorrai, senza dover più toccare il codice.
+Il servizio è dotato di un selettore a TRE STATI (vedi funzione `ambiente()`),
+non un semplice acceso/spento:
+  - "spento"     -> nessun messaggio, da nessuna parte
+  - "test"       -> messaggi mandati solo sul canale privato di prova
+  - "produzione" -> messaggi mandati sul canale vero, con gli iscritti
+Il valore di default (variabile assente o vuota) è "test": così un servizio
+appena caricato è già utilizzabile per le prove, ma non può MAI finire per
+sbaglio sul canale vero senza una scelta esplicita.
 
 Variabili d'ambiente (riusa gli stessi Secrets del bollettino aria):
-  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-Variabile di repository (non segreta, per accendere/spegnere il servizio):
-  DIFFERENZIATA_ABILITATA = "true" per attivarlo (qualsiasi altro valore,
-  o l'assenza della variabile, lo tiene spento)
+  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_ID_TEST
+Variabile di repository (non segreta, il selettore a tre stati):
+  DIFFERENZIATA_AMBIENTE = "spento" | "test" | "produzione"
+  (qualsiasi valore non riconosciuto viene trattato come "spento", per
+  sicurezza — un refuso non deve mai risultare in un invio sul canale vero)
 """
 
 import os
@@ -53,17 +58,29 @@ from zoneinfo import ZoneInfo
 import requests
 
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TG_CHAT = os.environ.get("TELEGRAM_CHAT_ID")
+TG_CHAT_PRODUZIONE = os.environ.get("TELEGRAM_CHAT_ID")
+TG_CHAT_TEST = os.environ.get("TELEGRAM_CHAT_ID_TEST")
 
 
-def abilitato():
-    """Interruttore del servizio. Finché la variabile di repository
-    DIFFERENZIATA_ABILITATA non vale esattamente "true", lo script non
-    manda nulla — anche se il workflow gira regolarmente. Serve a poter
-    caricare tutto ora e accendere il servizio più avanti, cambiando un
-    solo valore su GitHub invece di ricaricare file."""
-    return os.environ.get("DIFFERENZIATA_ABILITATA", "").strip().lower() \
-        == "true"
+def ambiente():
+    """Legge DIFFERENZIATA_AMBIENTE e ritorna sempre uno tra
+    'spento' / 'test' / 'produzione'. Default 'test' se la variabile è
+    assente o vuota; qualsiasi valore non riconosciuto -> 'spento'
+    (fail-safe: un refuso non deve mai mandare nulla in produzione)."""
+    grezzo = os.environ.get("DIFFERENZIATA_AMBIENTE", "").strip().lower()
+    if grezzo == "":
+        return "test"
+    if grezzo in ("test", "produzione"):
+        return grezzo
+    return "spento"
+
+
+def chat_destinazione(amb):
+    if amb == "produzione":
+        return TG_CHAT_PRODUZIONE
+    if amb == "test":
+        return TG_CHAT_TEST
+    return None
 
 # Lun=0 ... Dom=6 (standard Python weekday())
 MATERIALE_SERALE = {
@@ -77,11 +94,16 @@ MATERIALE_SERALE = {
 }
 
 
-def check_env():
-    for name, val in [("TELEGRAM_BOT_TOKEN", TG_TOKEN),
-                      ("TELEGRAM_CHAT_ID", TG_CHAT)]:
-        if not val:
-            sys.exit(f"Errore: variabile d'ambiente mancante: {name}")
+def check_env(amb):
+    mancanti = []
+    if not TG_TOKEN:
+        mancanti.append("TELEGRAM_BOT_TOKEN")
+    if amb == "produzione" and not TG_CHAT_PRODUZIONE:
+        mancanti.append("TELEGRAM_CHAT_ID")
+    if amb == "test" and not TG_CHAT_TEST:
+        mancanti.append("TELEGRAM_CHAT_ID_TEST")
+    if mancanti:
+        sys.exit(f"Errore: variabili d'ambiente mancanti: {', '.join(mancanti)}")
 
 
 def settimana_del_mese(data):
@@ -96,10 +118,10 @@ def settimana_del_mese(data):
     return conteggio
 
 
-def send_message(text):
+def send_message(text, chat_id):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     resp = requests.post(url, json={
-        "chat_id": TG_CHAT, "text": text, "parse_mode": "HTML",
+        "chat_id": chat_id, "text": text, "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }, timeout=30)
     if not resp.ok:
@@ -109,7 +131,7 @@ def send_message(text):
 
 # --- Le due modalità -------------------------------------------------------
 
-def promemoria_serale(oggi):
+def promemoria_serale(oggi, chat_id):
     voce = MATERIALE_SERALE[oggi.weekday()]
     if voce is None:
         testo = ("\u23F8\ufe0f <b>Come sta Solofra</b>\n\n"
@@ -125,10 +147,10 @@ def promemoria_serale(oggi):
     print("--- Anteprima (sera) ---")
     print(testo)
     print("------------------------")
-    send_message(testo)
+    send_message(testo, chat_id)
 
 
-def promemoria_vetro_venerdi(oggi):
+def promemoria_vetro_venerdi(oggi, chat_id):
     if oggi.weekday() != 4:  # non e' venerdi': non succede nulla
         print("Non è venerdì: nessun controllo vetro da fare.")
         return
@@ -142,22 +164,25 @@ def promemoria_vetro_venerdi(oggi):
     print("--- Anteprima (mattina venerdì) ---")
     print(testo)
     print("------------------------------------")
-    send_message(testo)
+    send_message(testo, chat_id)
 
 
 def main():
-    if not abilitato():
-        print("Servizio non ancora abilitato (DIFFERENZIATA_ABILITATA "
-             "!= 'true'): nessun messaggio inviato. Per accenderlo, "
-             "imposta quella variabile di repository su 'true'.")
+    amb = ambiente()
+    if amb == "spento":
+        print("Ambiente 'spento' (o valore non riconosciuto in "
+             "DIFFERENZIATA_AMBIENTE): nessun messaggio inviato.")
         return
 
-    check_env()
+    check_env(amb)
+    chat_id = chat_destinazione(amb)
+    print(f"Ambiente attivo: {amb.upper()}")
+
     ora = datetime.now(ZoneInfo("Europe/Rome"))
     if ora.hour < 12:
-        promemoria_vetro_venerdi(ora.date())
+        promemoria_vetro_venerdi(ora.date(), chat_id)
     else:
-        promemoria_serale(ora.date())
+        promemoria_serale(ora.date(), chat_id)
 
 
 if __name__ == "__main__":

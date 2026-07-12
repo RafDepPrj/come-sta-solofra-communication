@@ -88,5 +88,14 @@
    "Avellino": 22,
    "Salerno": 61
   }
+ },
+ {
+  "ts": "2026-07-12T23:49+02:00",
+  "aqi": 41,
+  "banda": "BUONA",
+  "nearby": {
+   "Avellino": 23,
+   "Salerno": 52
+  }
  }
 ]

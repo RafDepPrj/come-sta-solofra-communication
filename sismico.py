@@ -205,6 +205,10 @@ def build_message(evento, distanza):
                  "Vulcanologia (catalogo ISIDe).")
     righe.append("<i>Dato preliminare, può essere rivisto nelle ore "
                  "successive dall'INGV.</i>")
+    righe.append("")
+    righe.append("\u26A0\ufe0f <i>Questo non è un canale di emergenza "
+                 "ufficiale. Per allerte e indicazioni di sicurezza, fai "
+                 "sempre riferimento a INGV e Protezione Civile.</i>")
     return "\n".join(righe)
 
 
@@ -221,6 +225,31 @@ def send_message(text, chat_id):
 
 # --- Main ------------------------------------------------------------------
 
+def invia_esempio(chat_id):
+    """Manda un messaggio con dati di esempio (non un evento reale), per
+    vedere subito il formato nel canale senza aspettare un vero terremoto.
+    Attivato con SISMICO_MESSAGGIO_DI_PROVA=true. Passa dallo stesso
+    build_message()/send_message() della modalità normale, quindi il
+    formato è identico a quello reale — cambia solo il contenuto, ed è
+    chiaramente etichettato come prova in cima al messaggio."""
+    evento = {
+        "id": "esempio-non-reale",
+        "tempo": datetime.now(ZoneInfo("UTC")).isoformat(),
+        "lat": SOLOFRA_LAT + 0.05,
+        "lon": SOLOFRA_LON + 0.03,
+        "profondita_km": 9.0,
+        "magnitudo": 2.7,
+        "zona": "4 km NE Solofra (AV) \u2014 dato di esempio",
+    }
+    distanza = distanza_km(SOLOFRA_LAT, SOLOFRA_LON, evento["lat"], evento["lon"])
+    msg = ("\u26A0\ufe0f <b>MESSAGGIO DI PROVA \u2014 nessun evento reale "
+          "è avvenuto</b>\n\n" + build_message(evento, distanza))
+    print("--- Anteprima (messaggio di prova) ---")
+    print(msg)
+    print("----------------------------------------")
+    send_message(msg, chat_id)
+
+
 def main():
     amb = ambiente()
     if amb == "spento":
@@ -231,6 +260,11 @@ def main():
     check_env(amb)
     chat_id = chat_destinazione(amb)
     print(f"Ambiente attivo: {amb.upper()}")
+
+    if os.environ.get("SISMICO_MESSAGGIO_DI_PROVA", "").strip().lower() \
+            == "true":
+        invia_esempio(chat_id)
+        return
 
     già_notificati = leggi_notificati()
 

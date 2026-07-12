@@ -27,6 +27,9 @@ FEED_URL = "https://api.waqi.info/feed/{}/"
 SEARCH_URL = "https://api.waqi.info/search/"
 PAGINA_STAZIONE = ("https://aqicn.org/city/italy/campania/solofra/"
                    "solofra-zona-industriale/")
+# NOTA: verifica che questo sia l'URL reale della pagina "Aria" sulla tua
+# dashboard — se il dominio è diverso, aggiorna qui.
+DASHBOARD_URL = "https://rafdepprj.github.io/comestasolofra/"
 
 # Comuni vicini con centralina. Chi non ha una stazione (o è temporaneamente
 # spento) viene nascosto in automatico. Per aggiungerne uno basta il nome.
@@ -385,7 +388,8 @@ def build_caption(data, nearby, trend=None):
     if contesto:
         righe.append(f"\U0001F321\ufe0f {contesto}")
 
-    righe.append(f"Dettagli: {PAGINA_STAZIONE}")
+    righe.append(f"Il dato: {PAGINA_STAZIONE}")
+    righe.append(f"Come funziona questo canale: {DASHBOARD_URL}")
     return "\n".join(righe)
 
 

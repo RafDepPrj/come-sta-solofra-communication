@@ -30,5 +30,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          DIFFERENZIATA_ABILITATA: ${{ vars.DIFFERENZIATA_ABILITATA }}
+          TELEGRAM_CHAT_ID_TEST: ${{ secrets.TELEGRAM_CHAT_ID_TEST }}
+          DIFFERENZIATA_AMBIENTE: ${{ vars.DIFFERENZIATA_AMBIENTE }}
         run: python differenziata.py

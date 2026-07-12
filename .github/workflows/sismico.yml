@@ -2,10 +2,10 @@ name: Avviso sismico Solofra
 
 on:
   schedule:
-    # Ogni ora — un tema di sicurezza giustifica un controllo più frequente
-    # dell'aria. Costa comunque pochi secondi a esecuzione, e la maggior
-    # parte dei controlli non troverà nulla di rilevante da segnalare.
-    - cron: '0 * * * *'
+    # Ogni 15 minuti — sotto questa soglia non guadagniamo molto: INGV
+    # stesso impiega qualche minuto a validare un evento prima che compaia
+    # nei dati, quindi controllare più spesso non lo farebbe comparire prima.
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -32,6 +32,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_CHAT_ID_TEST: ${{ secrets.TELEGRAM_CHAT_ID_TEST }}
           SISMICO_AMBIENTE: ${{ vars.SISMICO_AMBIENTE }}
+          SISMICO_MESSAGGIO_DI_PROVA: ${{ vars.SISMICO_MESSAGGIO_DI_PROVA }}
         run: python sismico.py
 
       - name: Salva lo stato degli eventi già notificati

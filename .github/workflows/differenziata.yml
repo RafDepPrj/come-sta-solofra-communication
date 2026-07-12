@@ -1,0 +1,34 @@
+name: Promemoria differenziata Solofra
+
+on:
+  schedule:
+    # Sera, tutti i giorni: promemoria di cosa esporre stasera.
+    # 17:30 UTC -> 19:30 CEST (estate) / 18:30 CET (inverno)
+    - cron: '30 17 * * *'
+    # Mattina, solo venerdì: controllo vetro (esposizione entro le 12:00,
+    # quindi deve arrivare presto). 6:00 UTC -> 8:00 CEST / 7:00 CET.
+    - cron: '0 6 * * 5'
+  workflow_dispatch:   # per testare a mano — lo script capisce da solo se
+                       # è "sera" o "mattina" guardando l'ora attuale
+
+jobs:
+  promemoria:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repository
+        uses: actions/checkout@v5
+
+      - name: Installa Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Installa dipendenze
+        run: pip install requests
+
+      - name: Invia il promemoria
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DIFFERENZIATA_ABILITATA: ${{ vars.DIFFERENZIATA_ABILITATA }}
+        run: python differenziata.py

@@ -2,12 +2,14 @@ name: Bollettino aria Solofra
 
 on:
   schedule:
-    # 4 volte al giorno. Orari in UTC: in Italia sono +1h (inverno) o +2h (estate).
-    # 06:00 UTC -> 07/08   10:00 UTC -> 11/12   14:00 UTC -> 15/16   18:00 UTC -> 19/20
-    - cron: '0 6,10,14,18 * * *'
+    # Controlla ogni 2 ore durante il giorno (7-22 circa ora italiana).
+    # NON pubblica quasi mai: lo script decide da solo se c'è qualcosa da
+    # dire (cambio di fascia) o se sono passati troppi giorni in silenzio.
+    # La maggior parte di questi run non manda alcun messaggio: costano
+    # pochi secondi e zero rumore per chi segue il canale.
+    - cron: '0 5,7,9,11,13,15,17,19,21 * * *'
   workflow_dispatch:   # per lanciarlo a mano dal tab "Actions"
 
-# Serve per far ri-salvare stato.json nel repo (per la freccia di tendenza).
 permissions:
   contents: write
 
@@ -26,17 +28,17 @@ jobs:
       - name: Installa dipendenze
         run: pip install requests pillow
 
-      - name: Genera e invia il bollettino
+      - name: Controlla e pubblica solo se necessario
         env:
           WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bollettino.py
 
-      - name: Salva lo stato per la prossima esecuzione
+      - name: Salva lo stato e lo storico per la prossima esecuzione
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add stato.json
-          git diff --staged --quiet || git commit -m "Aggiorna stato AQI [skip ci]"
+          git add stato.json storico.json
+          git diff --staged --quiet || git commit -m "Aggiorna stato e storico aria [skip ci]"
           git push

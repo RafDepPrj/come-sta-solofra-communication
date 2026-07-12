@@ -1,0 +1,11 @@
+[
+ {
+  "ts": "2026-07-12T06:46+02:00",
+  "aqi": 33,
+  "banda": "BUONA",
+  "nearby": {
+   "Avellino": 23,
+   "Salerno": 39
+  }
+ }
+]

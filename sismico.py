@@ -33,6 +33,14 @@ Variabili d'ambiente (riusa gli stessi Secrets del bollettino aria):
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_ID_TEST
 Variabile di repository (non segreta, il selettore a tre stati):
   SISMICO_AMBIENTE = "spento" | "test" | "produzione"
+Variabili di repository per la verifica (non inviano nulla su Telegram):
+  SISMICO_MESSAGGIO_DI_PROVA = "true" manda un messaggio con dati finti,
+      per vedere il formato senza aspettare un evento vero
+  SISMICO_DIAGNOSTICA = "true" interroga INGV su una finestra larga (30
+      giorni, 100 km) e stampa solo nei log cosa ha trovato — serve a
+      dimostrare che la connessione e il formato funzionano DAVVERO,
+      perché "zero eventi rilevanti" e "richiesta rotta" altrimenti
+      producono lo stesso identico output nei log
 """
 
 import os
@@ -132,25 +140,83 @@ def salva_notificati(ids):
 
 # --- Recupero e parsing eventi -------------------------------------------------
 
+def interroga_ingv(inizio, fine, raggio_km, mag_minima):
+    """Chiamata generica a INGV — usata sia dal controllo normale sia dalla
+    diagnostica, così testiamo davvero lo stesso identico percorso di
+    codice e non una copia parallela che potrebbe comportarsi diversamente."""
+    params = {
+        "starttime": inizio.strftime("%Y-%m-%dT%H:%M:%S"),
+        "endtime": fine.strftime("%Y-%m-%dT%H:%M:%S"),
+        "lat": SOLOFRA_LAT,
+        "lon": SOLOFRA_LON,
+        "maxradiuskm": raggio_km,
+        "minmagnitude": mag_minima,
+        "format": "text",
+    }
+    resp = requests.get(INGV_URL, params=params, timeout=30)
+    print(f"[diagnostica] URL: {resp.url}")
+    print(f"[diagnostica] Codice HTTP: {resp.status_code}")
+    resp.raise_for_status()
+    print(f"[diagnostica] Lunghezza risposta grezza: {len(resp.text)} "
+         f"caratteri")
+    return resp.text
+
+
 def fetch_eventi():
     """Interroga l'API INGV per gli eventi delle ultime FINESTRA_CONTROLLO_ORE
     ore entro il raggio più ampio delle soglie, poi filtra localmente."""
     ora = datetime.now(ZoneInfo("UTC"))
     inizio = ora - timedelta(hours=FINESTRA_CONTROLLO_ORE)
     raggio_max = max(r for r, _ in SOGLIE)
+    mag_min = min(m for _, m in SOGLIE) - 0.5  # margine, filtriamo dopo
 
-    params = {
-        "starttime": inizio.strftime("%Y-%m-%dT%H:%M:%S"),
-        "endtime": ora.strftime("%Y-%m-%dT%H:%M:%S"),
-        "lat": SOLOFRA_LAT,
-        "lon": SOLOFRA_LON,
-        "maxradiuskm": raggio_max,
-        "minmagnitude": min(m for _, m in SOGLIE) - 0.5,  # margine, filtriamo dopo
-        "format": "text",
-    }
-    resp = requests.get(INGV_URL, params=params, timeout=30)
-    resp.raise_for_status()
-    return parse_testo_fdsn(resp.text)
+    testo = interroga_ingv(inizio, ora, raggio_max, mag_min)
+    return parse_testo_fdsn(testo)
+
+
+def diagnostica():
+    """NON manda nulla su Telegram: interroga INGV con una finestra molto
+    più larga (30 giorni, 100 km, qualunque magnitudo) per dimostrare se la
+    connessione e il formato funzionano davvero, indipendentemente dal
+    fatto che negli ultimi eventi non ci fosse nulla di rilevante da
+    segnalare — "zero eventi rilevanti" e "la richiesta è rotta" hanno
+    altrimenti lo stesso identico output nei log."""
+    print("=== DIAGNOSTICA: nessun messaggio verrà inviato, solo lettura ===\n")
+    ora = datetime.now(ZoneInfo("UTC"))
+    inizio = ora - timedelta(days=30)
+    try:
+        testo = interroga_ingv(inizio, ora, 100, 0.0)
+    except requests.RequestException as e:
+        print(f"\n❌ ERRORE: la chiamata a INGV è fallita: {e}")
+        print("Questo conferma un problema di connessione o di formato, "
+             "non semplicemente 'nessun evento'.")
+        return
+
+    eventi = parse_testo_fdsn(testo)
+    print(f"\nEventi trovati negli ultimi 30 giorni entro 100 km: "
+         f"{len(eventi)}")
+
+    if not eventi:
+        print("\n⚠️ ZERO eventi in 30 giorni entro 100 km è molto "
+             "improbabile per l'Irpinia. Probabile problema di parametri "
+             "o di formato — incolla queste righe di log per farle "
+             "controllare, prima di fidarti dei controlli regolari.")
+        print("\nPrime righe della risposta grezza, per capire cosa ha "
+             "risposto INGV davvero:")
+        print(testo[:500])
+        return
+
+    print("✅ La connessione e il formato funzionano: questi sono eventi "
+         "reali letti da INGV.\n")
+    print("Alcuni esempi (fino a 5, i più vicini a Solofra):")
+    eventi_con_distanza = [
+        (distanza_km(SOLOFRA_LAT, SOLOFRA_LON, e["lat"], e["lon"]), e)
+        for e in eventi if e["magnitudo"] is not None
+    ]
+    eventi_con_distanza.sort(key=lambda x: x[0])
+    for dist, e in eventi_con_distanza[:5]:
+        print(f"  - mag {e['magnitudo']:.1f}, {dist:.0f} km da Solofra, "
+             f"zona: {e['zona']}, ora: {e['tempo']}")
 
 
 def parse_testo_fdsn(testo):
@@ -251,6 +317,10 @@ def invia_esempio(chat_id):
 
 
 def main():
+    if os.environ.get("SISMICO_DIAGNOSTICA", "").strip().lower() == "true":
+        diagnostica()
+        return  # la diagnostica non manda nulla: si ferma sempre qui
+
     amb = ambiente()
     if amb == "spento":
         print("Ambiente 'spento' (o valore non riconosciuto in "

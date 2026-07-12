@@ -1,0 +1,28 @@
+name: Riepilogo settimanale aria Solofra
+
+on:
+  schedule:
+    # Ogni lunedì mattina, ~7:30/8:30 ora italiana (a seconda di ora legale).
+    - cron: '30 6 * * 1'
+  workflow_dispatch:   # per lanciarlo a mano — vedi note sul testing
+
+jobs:
+  riepilogo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repository
+        uses: actions/checkout@v5
+
+      - name: Installa Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Installa dipendenze
+        run: pip install requests pillow
+
+      - name: Genera e invia il riepilogo settimanale
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python settimanale.py

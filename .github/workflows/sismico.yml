@@ -33,6 +33,7 @@ jobs:
           TELEGRAM_CHAT_ID_TEST: ${{ secrets.TELEGRAM_CHAT_ID_TEST }}
           SISMICO_AMBIENTE: ${{ vars.SISMICO_AMBIENTE }}
           SISMICO_MESSAGGIO_DI_PROVA: ${{ vars.SISMICO_MESSAGGIO_DI_PROVA }}
+          SISMICO_DIAGNOSTICA: ${{ vars.SISMICO_DIAGNOSTICA }}
         run: python sismico.py
 
       - name: Salva lo stato degli eventi già notificati

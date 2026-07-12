@@ -1,0 +1,47 @@
+name: Avviso sismico Solofra
+
+on:
+  schedule:
+    # Ogni ora — un tema di sicurezza giustifica un controllo più frequente
+    # dell'aria. Costa comunque pochi secondi a esecuzione, e la maggior
+    # parte dei controlli non troverà nulla di rilevante da segnalare.
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # per salvare stato_sismico.json (dedup eventi)
+
+jobs:
+  avviso:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repository
+        uses: actions/checkout@v5
+
+      - name: Installa Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Installa dipendenze
+        run: pip install requests
+
+      - name: Controlla e invia se necessario
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_TEST: ${{ secrets.TELEGRAM_CHAT_ID_TEST }}
+          SISMICO_AMBIENTE: ${{ vars.SISMICO_AMBIENTE }}
+        run: python sismico.py
+
+      - name: Salva lo stato degli eventi già notificati
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -f stato_sismico.json ]; then
+            git add stato_sismico.json
+            git diff --staged --quiet || git commit -m "Aggiorna stato sismico [skip ci]"
+            git push
+          else
+            echo "stato_sismico.json non esiste ancora (servizio spento o nessun evento mai notificato): nulla da salvare."
+          fi

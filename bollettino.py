@@ -29,7 +29,7 @@ PAGINA_STAZIONE = ("https://aqicn.org/city/italy/campania/solofra/"
                    "solofra-zona-industriale/")
 # NOTA: verifica che questo sia l'URL reale della pagina "Aria" sulla tua
 # dashboard — se il dominio è diverso, aggiorna qui.
-DASHBOARD_URL = "https://rafdepprj.github.io/comestasolofra/"
+DASHBOARD_URL = "https://rafdepprj.github.io/comestasolofra/aria.html"
 
 # Comuni vicini con centralina. Chi non ha una stazione (o è temporaneamente
 # spento) viene nascosto in automatico. Per aggiungerne uno basta il nome.
@@ -582,7 +582,40 @@ def send_photo(path, caption):
     print("Bollettino inviato correttamente.")
 
 
+MINUTI_MINIMI_TRA_CONTROLLI = 110  # ~2 ore, con margine di sicurezza
+
+
+def tempo_da_ultimo_controllo():
+    """Minuti trascorsi dall'ultimo controllo registrato in storico.json
+    (che si aggiorna ad OGNI esecuzione, pubblichi o no). None se non c'è
+    ancora nessuno storico (primissima esecuzione in assoluto)."""
+    try:
+        with open(STORICO_PATH, encoding="utf-8") as f:
+            record = json.load(f)
+        if not record:
+            return None
+        ultimo_ts = max(datetime.fromisoformat(r["ts"]) for r in record)
+        ora = datetime.now(ZoneInfo("Europe/Rome"))
+        return (ora - ultimo_ts).total_seconds() / 60
+    except (FileNotFoundError, ValueError, OSError, KeyError):
+        return None
+
+
 def main():
+    # Il workflow ora gira molto più spesso di quanto serva (per assorbire
+    # il fatto che GitHub può saltare dei trigger programmati, come
+    # osservato più volte) — è qui, non nel cron, che decidiamo se è
+    # davvero il momento di controllare l'aria. Un tentativo perso da
+    # GitHub non lascia più un buco di 2 ore: ne arriva un altro pochi
+    # minuti dopo, e QUESTO controllo decide se è già tempo o è troppo
+    # presto rispetto all'ultimo vero controllo fatto.
+    minuti_trascorsi = tempo_da_ultimo_controllo()
+    if minuti_trascorsi is not None and minuti_trascorsi < MINUTI_MINIMI_TRA_CONTROLLI:
+        print(f"Ultimo controllo {minuti_trascorsi:.0f} minuti fa "
+             f"(< {MINUTI_MINIMI_TRA_CONTROLLI}): troppo presto, nessuna "
+             f"chiamata a WAQI questa volta.")
+        return
+
     check_env()
     data = fetch_solofra()
     aqi = to_int(data.get("aqi"))

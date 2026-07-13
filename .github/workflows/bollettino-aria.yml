@@ -2,12 +2,16 @@ name: Bollettino aria Solofra
 
 on:
   schedule:
-    # Controlla ogni 2 ore durante il giorno (7-22 circa ora italiana).
-    # NON pubblica quasi mai: lo script decide da solo se c'è qualcosa da
-    # dire (cambio di fascia) o se sono passati troppi giorni in silenzio.
-    # La maggior parte di questi run non manda alcun messaggio: costano
-    # pochi secondi e zero rumore per chi segue il canale.
-    - cron: '0 5,7,9,11,13,15,17,19,21 * * *'
+    # GitHub dichiara esplicitamente che i trigger 'schedule' sono "best
+    # effort": possono ritardare o venire SALTATI del tutto sotto carico,
+    # senza produrre nessun errore visibile — l'abbiamo verificato con i
+    # log reali (fino a metà delle esecuzioni attese mancanti in un giorno).
+    # Rimediamo con la ridondanza: proviamo ogni 20 minuti (a minuti non
+    # tondi, altro punto segnalato da GitHub come congestionato), e lascia
+    # decidere allo SCRIPT (non al cron) se sono già passate ~2 ore dal-
+    # l'ultimo controllo vero. Se GitHub salta un tentativo, il prossimo
+    # arriva 20 minuti dopo — non più un buco di 2 ore.
+    - cron: '3,23,43 * * * *'
   workflow_dispatch:   # per lanciarlo a mano dal tab "Actions"
 
 permissions:

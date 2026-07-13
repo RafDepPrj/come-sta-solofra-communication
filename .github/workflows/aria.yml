@@ -1,0 +1,57 @@
+name: Aria Solofra
+
+on:
+  schedule:
+    # GitHub dichiara esplicitamente che i trigger 'schedule' sono "best
+    # effort": possono ritardare o venire SALTATI del tutto sotto carico,
+    # senza produrre nessun errore visibile. Abbiamo osservato ripetuta-
+    # mente questo comportamento sul vecchio file (bollettino-aria.yml),
+    # verosimilmente perché modificato troppe volte in poco tempo — un
+    # file nuovo, con percorso mai visto da GitHub, forza una registra-
+    # zione pulita del cron.
+    #
+    # Rimediamo anche con la ridondanza: proviamo ogni 20 minuti (a minuti
+    # non tondi, altro punto segnalato da GitHub come congestionato), e
+    # lascia decidere allo SCRIPT (non al cron) se sono già passate ~2 ore
+    # dall'ultimo controllo vero (vedi bollettino.py). Se GitHub salta un
+    # tentativo, il prossimo arriva 20 minuti dopo — non più un buco di 2 ore.
+    #
+    # IMPORTANTE: da qui in avanti, evitare modifiche frequenti a questo
+    # file — è probabilmente proprio l'editing ripetuto ad aver bloccato
+    # il file precedente. Raggruppare eventuali cambi futuri, non spezzet-
+    # tarli in tanti piccoli commit ravvicinati.
+    - cron: '3,23,43 * * * *'
+  workflow_dispatch:   # per lanciarlo a mano dal tab "Actions"
+
+permissions:
+  contents: write
+
+jobs:
+  bollettino:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repository
+        uses: actions/checkout@v5
+
+      - name: Installa Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Installa dipendenze
+        run: pip install requests pillow
+
+      - name: Controlla e pubblica solo se necessario
+        env:
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bollettino.py
+
+      - name: Salva lo stato e lo storico per la prossima esecuzione
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add stato.json storico.json
+          git diff --staged --quiet || git commit -m "Aggiorna stato e storico aria [skip ci]"
+          git push

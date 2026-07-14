@@ -609,17 +609,34 @@ def main():
     # GitHub non lascia più un buco di 2 ore: ne arriva un altro pochi
     # minuti dopo, e QUESTO controllo decide se è già tempo o è troppo
     # presto rispetto all'ultimo vero controllo fatto.
+    #
+    # FORZA_CONTROLLO=true salta l'auto-limite: serve per i lanci manuali
+    # di verifica, quando si vuole un dato fresco subito invece di aspettare
+    # che sia "il momento giusto" secondo la cadenza normale.
+    forza = os.environ.get("FORZA_CONTROLLO", "").strip().lower() == "true"
     minuti_trascorsi = tempo_da_ultimo_controllo()
-    if minuti_trascorsi is not None and minuti_trascorsi < MINUTI_MINIMI_TRA_CONTROLLI:
+    if not forza and minuti_trascorsi is not None \
+            and minuti_trascorsi < MINUTI_MINIMI_TRA_CONTROLLI:
         print(f"Ultimo controllo {minuti_trascorsi:.0f} minuti fa "
              f"(< {MINUTI_MINIMI_TRA_CONTROLLI}): troppo presto, nessuna "
-             f"chiamata a WAQI questa volta.")
+             f"chiamata a WAQI questa volta. (Imposta FORZA_CONTROLLO=true "
+             f"per bypassare questo limite in un lancio manuale.)")
         return
+    if forza:
+        print("FORZA_CONTROLLO attivo: salto l'auto-limite, chiamo WAQI ora.")
 
     check_env()
     data = fetch_solofra()
     aqi = to_int(data.get("aqi"))
     nearby = fetch_nearby()  # sempre: serve anche quando non pubblichiamo
+
+    # Log esplicito del valore grezzo, sempre — così in futuro un dubbio
+    # tipo "il sito mostra un numero diverso" si risolve leggendo il log
+    # invece di doverlo dedurre o aspettare il prossimo controllo.
+    ora_log = datetime.now(ZoneInfo("Europe/Rome")).strftime("%H:%M")
+    print(f"[{ora_log}] AQI grezzo ricevuto da WAQI: {aqi} "
+         f"(fascia: {banda(aqi)['label']}) \u2014 dominante: "
+         f"{data.get('dominentpol', 'n/d')}")
 
     # Registra SEMPRE questo controllo nello storico, a prescindere dal
     # fatto che si pubblichi o meno — è la base dati per il riepilogo

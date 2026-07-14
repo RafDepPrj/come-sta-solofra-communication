@@ -22,6 +22,11 @@ on:
     # tarli in tanti piccoli commit ravvicinati.
     - cron: '3,23,43 * * * *'
   workflow_dispatch:   # per lanciarlo a mano dal tab "Actions"
+    inputs:
+      forza_controllo:
+        description: 'Forza un controllo vero, ignorando l''auto-limite (per verifiche manuali)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -46,6 +51,7 @@ jobs:
           WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORZA_CONTROLLO: ${{ github.event.inputs.forza_controllo }}
         run: python bollettino.py
 
       - name: Salva lo stato e lo storico per la prossima esecuzione

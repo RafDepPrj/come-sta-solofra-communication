@@ -64,7 +64,11 @@ FINESTRA_CONTROLLO_ORE = 4        # margine sulla frequenza di controllo,
                                    # per non perdere eventi tra un run e l'altro
 
 # (raggio_km, magnitudo_minima) — dal più vicino/permissivo al più lontano/esigente
-SOGLIE = [(20, 2.0), (60, 3.5)]
+# Soglia dei 60 km abbassata da 3.5 a 3.0 il 14/07/2026, dopo il caso reale
+# dell'evento di Apice (BN): ML 3.3 a 26 km da Solofra, avvertito
+# distintamente in Irpinia secondo le cronache locali, ma rimasto sotto la
+# vecchia soglia per un margine di appena 0.2.
+SOGLIE = [(20, 2.0), (60, 3.0)]
 
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TG_CHAT_PRODUZIONE = os.environ.get("TELEGRAM_CHAT_ID")

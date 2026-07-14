@@ -79,33 +79,44 @@ def to_int(value):
 
 
 def banda(aqi):
-    """(emoji, label, advice, color RGB, text RGB) per un valore AQI."""
+    """(emoji, label, advice, color RGB, text RGB) per un valore AQI.
+
+    Le soglie usano '<' e non '<=': un valore esattamente sul confine
+    (es. 100) va nella fascia più cautelativa, non in quella più leggera.
+    Scelta deliberata dopo aver osservato che aqicn.org etichetta un AQI
+    di 100 come "Unhealthy for Sensitive Groups" (fascia superiore) anziché
+    "Moderate" come farebbe lo standard EPA in punta di cavillo — molto
+    probabilmente un decimale interno (100.x) arrotondato per la
+    visualizzazione. In un servizio sulla salute, tra corrispondere allo
+    standard tecnico puro e corrispondere a quello che i cittadini vedono
+    verificando la fonte citata, scegliamo il secondo: meglio prudenti che
+    scoperti su un confine ambiguo."""
     if aqi is None:
         return {"emoji": "\u26aa", "label": "NON DISPONIBILE",
                 "advice": "Dato non disponibile in questo momento.",
                 "color": (150, 150, 150), "text": (255, 255, 255)}
-    if aqi <= 50:
+    if aqi < 50:
         return {"emoji": "\U0001F7E2", "label": "BUONA",
                 "advice": "Aria buona. Attività all'aperto senza problemi "
                           "per tutti.",
                 "color": (46, 158, 79), "text": (255, 255, 255)}
-    if aqi <= 100:
+    if aqi < 100:
         return {"emoji": "\U0001F7E1", "label": "ACCETTABILE",
                 "advice": "Aria accettabile. Le persone molto sensibili "
                           "valutino di ridurre sforzi intensi e prolungati "
                           "all'aperto.",
                 "color": (224, 168, 0), "text": (40, 40, 40)}
-    if aqi <= 150:
+    if aqi < 150:
         return {"emoji": "\U0001F7E0", "label": "INSALUBRE PER I SENSIBILI",
                 "advice": "Bambini, anziani e chi ha problemi respiratori "
                           "riducano gli sforzi prolungati all'aperto.",
                 "color": (233, 140, 20), "text": (255, 255, 255)}
-    if aqi <= 200:
+    if aqi < 200:
         return {"emoji": "\U0001F534", "label": "INSALUBRE",
                 "advice": "Tutti dovrebbero limitare gli sforzi prolungati "
                           "all'aperto; i gruppi sensibili evitarli.",
                 "color": (214, 64, 54), "text": (255, 255, 255)}
-    if aqi <= 300:
+    if aqi < 300:
         return {"emoji": "\U0001F7E3", "label": "MOLTO INSALUBRE",
                 "advice": "Evitare le attività all'aperto. I gruppi "
                           "sensibili restino in casa.",

@@ -1,26 +1,61 @@
-# Come Sta Solofra — bollettino aria su Telegram (con immagine)
+# Come Sta Solofra — bollettini automatici su Telegram
 
-Pubblica **4 volte al giorno**, in automatico e a costo zero, la qualità
-dell'aria della stazione **Solofra Zona Industriale** (dati World Air Quality
-Index Project / ARPA Campania) su un canale Telegram, sotto forma di **card
-grafica** con il semaforo AQI e il **confronto con i comuni vicini**
-(Serino, Avellino, Atripalda, Montoro, Mercato San Severino, Salerno).
+Pubblica in automatico, a costo zero, su un canale Telegram (`t.me/comestasolofra`)
+**quattro servizi indipendenti**: qualità dell'aria, riepilogo settimanale
+dell'aria, promemoria raccolta differenziata, avvisi sismici.
 
-Gira su **GitHub Actions**: nessun server da mantenere, il token resta nascosto
-nei *Secrets*.
+Gira interamente su **GitHub Actions**: nessun server da mantenere, i token
+restano nascosti nei *Secrets*.
+
+## I quattro servizi
+
+| Script | Workflow | Cosa fa | Cadenza reale |
+|---|---|---|---|
+| `bollettino.py` | `.github/workflows/aria.yml` | Card AQI + confronto comuni vicini | Trigger ogni 20 min, **ma pubblica solo quando cambia fascia** (min. 4h tra un post e l'altro) o dopo 7 giorni di silenzio |
+| `settimanale.py` | `.github/workflows/riepilogo-settimanale.yml` | Grafico a barre della settimana appena conclusa | Ogni lunedì alle 6:30 UTC, sempre (anche se piatta) |
+| `differenziata.py` | `.github/workflows/differenziata.yml` | Promemoria cosa esporre stasera + vetro il venerdì | Ogni sera alle 17:30 UTC + venerdì mattina 6:00 UTC (solo 1ª/3ª/5ª settimana del mese) |
+| `sismico.py` | `.github/workflows/sismico.yml` | Avviso se un evento sismico INGV supera la soglia di rilevanza | Trigger ogni 15 min, **ma pubblica solo se un evento nuovo supera la soglia** |
+
+Punto importante per `aria.yml` e `sismico.yml`: il **cron gira molto più
+spesso di quanto pubblichino**. GitHub dichiara i trigger `schedule` "best
+effort" (possono ritardare o essere saltati silenziosamente), quindi questi
+due workflow interrogano frequentemente ma è **lo script Python**, non il
+cron, a decidere se è davvero il momento di pubblicare — leggendo lo stato
+salvato nel repository. Un trigger saltato da GitHub non lascia più un buco:
+il tentativo successivo arriva pochi minuti dopo.
 
 ## File
-- `bollettino.py` — scarica i dati, cerca i comuni vicini, genera l'immagine e
-  la invia al canale.
-- `.github/workflows/bollettino-aria.yml` — lancia lo script 4 volte al giorno.
+
+- `bollettino.py` — scarica i dati WAQI, cerca i comuni vicini, decide se
+  pubblicare, genera l'immagine e la invia.
+- `settimanale.py` — legge `storico.json` (scritto da `bollettino.py` ad
+  ogni controllo, anche quando non pubblica) e genera il riepilogo del
+  lunedì. Riusa `banda()`/`to_int()`/`_font()`/`_wrap()` da `bollettino.py`.
+- `differenziata.py` — calendario fisso della raccolta, scritto nel codice
+  (nessuno scraping automatico dal Comune).
+- `sismico.py` — interroga il catalogo pubblico INGV (ISIDe, servizio FDSN),
+  filtra per distanza/magnitudo, deduplica con `stato_sismico.json`.
+- `.github/workflows/` — un workflow per script, orari e permessi descritti
+  sopra.
+
+## File di stato (letti e scritti dai workflow, committati nel repo)
+
+| File | Scritto da | A cosa serve |
+|---|---|---|
+| `stato.json` | `bollettino.py` | Ultimo bollettino **pubblicato** (aqi, fascia, timestamp) — usato per decidere il prossimo post e calcolare la tendenza |
+| `storico.json` | `bollettino.py` | Un record per **ogni controllo** (pubblichi o no), retention 9 giorni — materia prima del riepilogo settimanale |
+| `stato_sismico.json` | `sismico.py` | ID degli eventi sismici già notificati, per non ripetere lo stesso avviso |
+
+`aria.yml` e `sismico.yml` hanno `permissions: contents: write` e fanno commit
+automatico di questi file a fine esecuzione (`git commit -m "... [skip ci]"`).
 
 ## Chi "installa" cosa
 
 Due ruoli diversi:
 
 - **Il cittadino** non installa niente. Apre Telegram, cerca il canale (o apre
-  il tuo link `t.me/comestasolofra`) e tocca **Segui**. Da quel momento riceve
-  la card 4 volte al giorno. Può silenziare le notifiche ma restare iscritto.
+  il link `t.me/comestasolofra`) e tocca **Segui**. Da quel momento riceve
+  tutti i bollettini. Può silenziare le notifiche ma restare iscritto.
 - **Tu (chi gestisce)** fai il setup qui sotto una volta sola.
 
 ## Setup in 5 passi
@@ -34,43 +69,115 @@ Crea un **canale** (non un gruppo), es. pubblico `@comestasolofra`. Poi:
 impostazioni canale → *Amministratori* → aggiungi il tuo bot con permesso di
 **pubblicare messaggi**. Senza questo, il bot non può postare.
 
+Per `differenziata.py` e `sismico.py` conviene anche un **canale/chat di
+prova privato**, usato di default finché non attivi consapevolmente la
+produzione (vedi passo 4).
+
 ### 3. Trova il `chat_id`
 - Canale **pubblico**: il chat_id è direttamente `@nomecanale`.
 - Canale **privato**: serve l'id numerico (`-100...`); inoltra un post del
   canale a **@userinfobot** per ottenerlo.
 
-### 4. Metti i segreti nel repository
-Repo → **Settings → Secrets and variables → Actions → New repository secret**:
+### 4. Metti i segreti e le variabili nel repository
+Repo → **Settings → Secrets and variables → Actions**.
 
-| Nome | Valore |
-|------|--------|
-| `WAQI_TOKEN` | il tuo token dell'API aqicn/WAQI |
-| `TELEGRAM_BOT_TOKEN` | il token del bot (passo 1) |
-| `TELEGRAM_CHAT_ID` | il canale, es. `@comestasolofra` |
+**Secrets** (`New repository secret`):
+
+| Nome | Valore | Usato da |
+|------|--------|---|
+| `WAQI_TOKEN` | il tuo token dell'API aqicn/WAQI | `bollettino.py` |
+| `TELEGRAM_BOT_TOKEN` | il token del bot (passo 1) | tutti |
+| `TELEGRAM_CHAT_ID` | il canale vero, es. `@comestasolofra` | tutti |
+| `TELEGRAM_CHAT_ID_TEST` | il canale/chat di prova (passo 2) | `differenziata.py`, `sismico.py` |
+
+**Variables** (`New repository variable`, non segrete — selettori a tre
+stati `spento` / `test` / `produzione`, default `test` se assenti):
+
+| Nome | Valore | Effetto |
+|------|--------|---|
+| `DIFFERENZIATA_AMBIENTE` | `spento` \| `test` \| `produzione` | dove va il promemoria differenziata |
+| `SISMICO_AMBIENTE` | `spento` \| `test` \| `produzione` | dove va l'avviso sismico |
+| `SISMICO_MESSAGGIO_DI_PROVA` | `true` | manda un messaggio con dati finti, per vedere il formato |
+| `SISMICO_DIAGNOSTICA` | `true` | interroga INGV su una finestra larga (30gg/100km) e stampa solo nei log, senza inviare nulla |
+
+Qualsiasi valore non riconosciuto nei selettori a tre stati viene trattato
+come `spento`, per sicurezza: un refuso non deve mai risultare in un invio
+sul canale vero.
+
+`bollettino.py` e `settimanale.py` non hanno questo selettore: pubblicano
+sempre sul canale in `TELEGRAM_CHAT_ID` quando decidono di farlo.
 
 ### 5. Prova
-**Actions → Bollettino aria Solofra → Run workflow** per lanciarlo subito. Se
-tutto è a posto, la card compare nel canale. Da lì parte da solo, 4 volte al
-giorno.
+**Actions → (nome workflow) → Run workflow** per lanciarlo subito.
+- Per `aria.yml` puoi passare `forza_controllo: true` per bypassare
+  l'auto-limite delle ~2 ore tra un controllo vero e l'altro.
+- Per `sismico.yml`, prova prima con `SISMICO_DIAGNOSTICA=true` (nessun
+  invio, solo log) per confermare che la connessione a INGV funzioni, poi
+  con `SISMICO_MESSAGGIO_DI_PROVA=true` per vedere il formato del messaggio.
 
 ## Orari e frequenza
-Il cron è `0 6,10,14,18 * * *` = **06:00 / 10:00 / 14:00 / 18:00 UTC**, cioè
-circa 07–08, 11–12, 15–16, 19–20 ora italiana (varia con l'ora legale). Per
-cambiare orari o numero di uscite, modifica la riga `cron`. GitHub può ritardare
-di qualche minuto: normale. La stazione si aggiorna circa ogni ora, quindi 4
-uscite al giorno hanno senso senza essere ripetitive.
+
+- **Aria**: cron ogni 20 minuti (`3,23,43 * * * *`), ma pubblica solo al
+  cambio di fascia AQI (min. 4h dall'ultimo post) o dopo 7 giorni senza
+  aggiornamenti. In pratica, in media, capita circa 4 volte al giorno.
+- **Riepilogo settimanale**: `30 6 * * 1` → lunedì ~7:30/8:30 ora italiana
+  (a seconda di ora legale/solare).
+- **Differenziata**: `30 17 * * *` (ogni sera, ~19:30 CEST/18:30 CET) +
+  `0 6 * * 5` (venerdì mattina ~8:00 CEST/7:00 CET, solo per il vetro).
+- **Sismico**: cron ogni 15 minuti, ma invia solo se trova un evento nuovo
+  sopra soglia. INGV impiega comunque qualche minuto a validare un evento,
+  quindi controllare più spesso non lo farebbe comparire prima.
+
+GitHub può ritardare i trigger di qualche minuto o saltarli del tutto sotto
+carico: normale, è per questo che aria e sismico usano il polling frequente
+con decisione a valle nello script invece di un cron a bassa frequenza.
+
+⚠️ **Nota per chi tocca `aria.yml`**: il file ha già mostrato in passato il
+comportamento di GitHub che ignora un cron modificato troppo spesso in poco
+tempo. Evitare modifiche frequenti e ravvicinate a questo workflow;
+raggruppare eventuali cambi futuri in un solo commit.
 
 ## Comuni vicini
-Vengono cercati per nome tramite l'API. **Non tutti hanno una centralina**: chi
-non ce l'ha compare come `n/d` (pallino grigio). Puoi modificare l'elenco nella
-lista `NEARBY` in cima a `bollettino.py`. Se noti un abbinamento sbagliato,
-puoi "fissare" la stazione giusta usando l'ID esatto al posto del nome.
+Vengono cercati per nome tramite l'API WAQI. **Non tutti hanno una
+centralina**: chi non ce l'ha viene escluso in automatico (mai un dato
+falso attribuito al comune sbagliato). Elenco attuale in `NEARBY` in cima a
+`bollettino.py`: Avellino, Montoro, Mercato San Severino, Salerno. Per
+aggiungerne uno basta il nome; se un abbinamento è sbagliato si può
+"fissare" la stazione giusta con l'ID esatto al posto del nome.
+
+## Calendario raccolta differenziata
+Scritto a mano in `MATERIALE_SERALE` dentro `differenziata.py` (fonte:
+Comune di Solofra / app "La settimana", verificato il 12/07/2026). Non c'è
+nessuno scraping automatico: se il Comune cambia il calendario, va
+aggiornato a mano nel codice. Il vetro segue una regola diversa da tutto il
+resto (mattina, solo 1ª/3ª/5ª venerdì del mese, esposizione entro le 12:00).
+I pannolini/pannoloni del giovedì sono un servizio su registrazione: il
+promemoria lo segnala con una riga separata, non lo dà per scontato per
+tutti.
+
+## Soglie avviso sismico
+In `sismico.py`, lista `SOGLIE`: entro 20 km da Solofra magnitudo ≥ 2.0,
+entro 60 km magnitudo ≥ 3.0 (abbassata da 3.5 il 14/07/2026 dopo il caso
+reale dell'evento di Apice (BN), ML 3.3 a 26 km, avvertito distintamente in
+Irpinia ma sotto la vecchia soglia per un margine di appena 0.2).
+
+⚠️ **Non ancora verificato con una chiamata reale in produzione**: il
+dominio `webservices.ingv.it` blocca l'accesso automatico da alcuni
+ambienti di sviluppo. Il formato FDSN interrogato è uno standard
+documentato (stesso usato da USGS), ma la prima esecuzione vera va
+controllata nei log di GitHub Actions (o con `SISMICO_DIAGNOSTICA=true`)
+prima di fidarsi ciecamente.
 
 ## Note e limiti
-- **Attribuzione** a World Air Quality Index Project + ARPA Campania: già
-  presente nell'immagine e nella didascalia. Non rimuoverla.
-- **Uso non-profit**: le condizioni dell'API chiedono di avvisare via email il
-  team WAQI per l'uso pubblico non commerciale. Fallo prima di partire.
-- **Dati non validati**: grezzi e provvisori; il disclaimer è già nel post.
+- **Attribuzione** a World Air Quality Index Project + ARPA Campania (aria)
+  e a INGV (sismico): già presente nell'immagine/messaggio. Non rimuoverla.
+- **Uso non-profit**: le condizioni dell'API WAQI chiedono di avvisare via
+  email il team WAQI per l'uso pubblico non commerciale. Fallo prima di
+  partire.
+- **Dati non validati**: grezzi e provvisori (sia aria che sismico); il
+  disclaimer è già nei rispettivi messaggi.
 - **Indici, non concentrazioni**: i valori AQI (0–500) non sono microgrammi.
-- **Font**: la card usa DejaVu, presente di default sui runner di GitHub.
+- **Il canale sismico non è un servizio di emergenza ufficiale**: per
+  allerte e indicazioni di sicurezza, il messaggio stesso rimanda a INGV e
+  Protezione Civile.
+- **Font**: le card usano DejaVu, presente di default sui runner di GitHub.

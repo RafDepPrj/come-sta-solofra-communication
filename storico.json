@@ -367,5 +367,14 @@
    "Salerno": 25,
    "Avellino": 34
   }
+ },
+ {
+  "ts": "2026-07-16T02:11+02:00",
+  "aqi": 52,
+  "banda": "ACCETTABILE",
+  "nearby": {
+   "Salerno": 45,
+   "Avellino": 50
+  }
  }
 ]

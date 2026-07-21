@@ -23,16 +23,32 @@ Non proviamo mai a dedurre un esito quando il testo non è chiaro: meglio
 segnalare "referto da controllare a mano" che sbagliare in un senso o
 nell'altro su un dato sanitario.
 
-Oltre all'esito, il messaggio riporta sempre due parametri "chiave" in
+Oltre all'esito, il messaggio riporta sempre quattro parametri "chiave" in
 forma AGGREGATA su tutti i punti (non ripetuti punto per punto, per non
-fare overload): durezza e i solventi industriali tetracloroetilene/
-tricloroetilene. Questi ultimi non vengono mai omessi anche quando il
-valore è irrilevante, perché sono stati storicamente un tema sensibile
-per l'acqua di Solofra — il silenzio su questo parametro specifico
-sarebbe più sospetto che informativo. Il D.Lgs. 18/2023 fissa un limite
-sulla SOMMA dei due (non su ognuno singolarmente), e non tutti i referti
-includono questo pannello analitico (vedi `_estrai_solventi`) — mai
-extrapolato quando assente. I numeri riportati nel messaggio sono sempre
+fare overload): esito batteriologico, durezza, solventi industriali
+tetracloroetilene/tricloroetilene, nitrati. Ogni riga porta già con sé la
+sua spiegazione in linguaggio semplice (a cosa serve, perché conta) —
+niente riga didattica separata, sarebbe di nuovo la stessa ridondanza che
+volevamo evitare.
+
+I solventi non vengono mai omessi anche quando il valore è irrilevante,
+perché sono stati storicamente un tema sensibile per l'acqua di Solofra —
+il silenzio su questo parametro specifico sarebbe più sospetto che
+informativo. Il D.Lgs. 18/2023 fissa un limite sulla SOMMA dei due (non su
+ognuno singolarmente), e non tutti i referti includono questo pannello
+analitico (vedi `_estrai_solventi`) — mai extrapolato quando assente.
+
+Il messaggio cita anche il punto con più margine dai limiti di legge
+("il migliore"): sempre, perché una notizia positiva non fa mai danno
+anche quando il margine è risicato — ma se il divario con gli altri punti
+è sotto una soglia minima (`SOGLIA_DIVARIO`), lo dice esplicitamente
+("è rumore statistico, non un giudizio di qualità") invece di lasciar
+intendere una differenza che non esiste. Il punto "peggiore" viene invece
+nominato esplicitamente solo se si avvicina davvero a un limite
+(`SOGLIA_RILEVANTE`) — nominarlo sotto quella soglia allarmerebbe senza
+motivo.
+
+I numeri riportati nel messaggio sono sempre
 letti dal testo del referto, mai scritti a mano.
 
 Il servizio è dotato dello stesso selettore a TRE STATI degli altri servizi
@@ -238,13 +254,43 @@ def _estrai_solventi(testo_una_riga):
     }
 
 
+def _estrai_nitrato(testo_una_riga):
+    """mg/L NO3, limite di legge 50 — parametro rilevante in particolare
+    per la preparazione di alimenti per lattanti sotto i 6 mesi."""
+    m = re.search(r"Nitrato.*?mg/L\s*NO\s*3\s+([\d.,]+)\s+([\d.,]+)\s+(\d+)",
+                 testo_una_riga)
+    if not m:
+        return None
+    return {"valore": _num(m.group(2)), "limite": int(m.group(3))}
+
+
+def _estrai_conta(testo_una_riga, etichetta):
+    """UFC/100ml, il limite di legge per tutti e tre i parametri
+    batteriologici è 0 — qualunque conteggio > 0 è già un'anomalia."""
+    m = re.search(rf"{etichetta}.*?Ufc\s*/\s*100ml\s*-\s*(\d+)\s+(\d+)",
+                 testo_una_riga)
+    return int(m.group(1)) if m else None
+
+
+def _estrai_batteriologico(testo_una_riga):
+    """Coliformi, E. Coli, enterococchi: None se anche solo uno dei tre
+    manca dal referto, per non mostrare un 'tutto pulito' basato su un
+    conteggio parziale."""
+    coliformi = _estrai_conta(testo_una_riga, "batteri coliformi")
+    ecoli = _estrai_conta(testo_una_riga, "Escherichia Coli")
+    entero = _estrai_conta(testo_una_riga, "Enterococchi intestinali")
+    if coliformi is None or ecoli is None or entero is None:
+        return None
+    return {"coliformi": coliformi, "ecoli": ecoli, "entero": entero}
+
+
 def analizza_pdf(path):
-    """Estrae luogo, punto di prelievo, esito, durezza e solventi
-    (tetracloroetilene/tricloroetilene) da un singolo referto. 'conforme'
-    è True/False solo se il testo lo dichiara esplicitamente; None se non
-    troviamo la frase attesa — mai indovinato dai valori dei singoli
-    parametri (troppo eterogenei tra loro per un confronto generico e
-    affidabile)."""
+    """Estrae luogo, punto di prelievo, esito, durezza, solventi
+    (tetracloroetilene/tricloroetilene), nitrati e batteriologico da un
+    singolo referto. 'conforme' è True/False solo se il testo lo dichiara
+    esplicitamente; None se non troviamo la frase attesa — mai indovinato
+    dai valori dei singoli parametri (troppo eterogenei tra loro per un
+    confronto generico e affidabile)."""
     testo = "\n".join(p.extract_text() or "" for p in PdfReader(path).pages)
     testo_una_riga = re.sub(r"\s+", " ", testo)
     norm = _normalizza(testo)
@@ -268,6 +314,8 @@ def analizza_pdf(path):
         "conforme": conforme,
         "durezza": _estrai_durezza(testo_una_riga),
         "solventi": _estrai_solventi(testo_una_riga),
+        "nitrato": _estrai_nitrato(testo_una_riga),
+        "batteriologico": _estrai_batteriologico(testo_una_riga),
     }
 
 
@@ -316,6 +364,99 @@ def _riga_solventi(risultati):
            f"più alto {picco:g} µg/L (limite di legge {limite} µg/L).")
 
 
+def _riga_batteriologico(risultati):
+    testati = [r for r in risultati if r["batteriologico"] is not None]
+    if not testati:
+        return None
+    totale = len(risultati)
+    positivi = [r for r in testati
+               if any(r["batteriologico"].values())]
+    if not positivi:
+        return (f"\U0001F9A0 Batteriologico: 0 batteri rilevati "
+               f"(coliformi, E. Coli, enterococchi) in tutti i "
+               f"{len(testati)}/{totale} punti testati — il test più "
+               f"importante per la sicurezza immediata dell'acqua.")
+    return (f"\U0001F9A0 Batteriologico: batteri rilevati in "
+           f"{len(positivi)}/{len(testati)} punti testati (coliformi, "
+           f"E. Coli o enterococchi) — vedi dettaglio punti non "
+           f"conformi sopra.")
+
+
+def _riga_nitrati(risultati):
+    """Il D.Lgs. 18/2023 fissa lo stesso limite (50 mg/L) usato anche come
+    riferimento per l'acqua destinata alla preparazione di alimenti per
+    lattanti — lo citiamo come contesto sempre vero. La rassicurazione
+    "ben al di sotto" invece la aggiungiamo SOLO se il valore più alto
+    trovato è davvero basso rispetto al limite: altrimenti sarebbe
+    un'affermazione fissa scollegata dal dato reale di questo controllo."""
+    valori = [r["nitrato"]["valore"] for r in risultati
+             if r["nitrato"] is not None]
+    if not valori:
+        return None
+    limite = next(r["nitrato"]["limite"] for r in risultati
+                 if r["nitrato"] is not None)
+    if min(valori) == max(valori):
+        gamma = f"{valori[0]:g} mg/L in tutti i punti"
+    else:
+        gamma = f"da {min(valori):g} a {max(valori):g} mg/L a seconda del punto"
+
+    riga = (f"\U0001F37C Nitrati: {gamma} (limite di legge: {limite:g} "
+           f"mg/L — è anche il riferimento usato per l'acqua destinata "
+           f"alla preparazione del latte artificiale ai lattanti)")
+    if max(valori) / limite < 0.5:
+        riga += ", qui ben al di sotto."
+    return riga
+
+
+SOGLIA_RILEVANTE = 0.20   # 20% di un limite: sotto, è rumore statistico
+SOGLIA_DIVARIO = 0.10     # differenza minima tra migliore e peggiore
+
+
+def _margine(r):
+    """Rapporto valore/limite più alto tra i parametri numerici disponibili
+    per questo punto (0-1, più basso = più margine dai limiti). None se
+    non c'è nessun dato numerico utile per questo punto."""
+    rapporti = []
+    if r["nitrato"] is not None:
+        rapporti.append(r["nitrato"]["valore"] / r["nitrato"]["limite"])
+    if r["solventi"] is not None and not r["solventi"]["sotto_ldq"]:
+        rapporti.append(r["solventi"]["valore"] / r["solventi"]["limite"])
+    return max(rapporti) if rapporti else None
+
+
+def _nomi_punti(righe_risultati, limite=3):
+    nomi = [r["luogo"] or r["file"] for r in righe_risultati]
+    if len(nomi) <= limite:
+        return ", ".join(nomi)
+    return ", ".join(nomi[:limite]) + f" e altri {len(nomi) - limite}"
+
+
+def _riga_margine(risultati):
+    """'Il migliore' è sempre citato (non fa mai danno dirlo); 'il
+    peggiore' solo se il divario è abbastanza ampio da non essere rumore
+    statistico — altrimenti diremmo che un punto è 'peggiore' per una
+    differenza che non significa niente."""
+    con_margine = [(r, _margine(r)) for r in risultati]
+    con_margine = [(r, m) for r, m in con_margine if m is not None]
+    if not con_margine:
+        return None
+
+    m_min = min(m for _, m in con_margine)
+    m_max = max(m for _, m in con_margine)
+    migliori = [r for r, m in con_margine if m == m_min]
+    nomi_migliori = _nomi_punti(migliori)
+
+    if m_max >= SOGLIA_RILEVANTE and (m_max - m_min) >= SOGLIA_DIVARIO:
+        peggiori = [r for r, m in con_margine if m == m_max]
+        return (f"⭐ Punto con più margine dai limiti: {nomi_migliori}. "
+               f"Punto da tenere d'occhio: {_nomi_punti(peggiori)} "
+               f"(al {m_max * 100:.0f}% di un limite di legge).")
+
+    return (f"⭐ Punto con più margine dai limiti: {nomi_migliori}. Il "
+           f"distacco dagli altri punti è minimo — normale variazione "
+           f"tra un prelievo e l'altro, non un giudizio di qualità.")
+
+
 def build_message(data_archivio, risultati):
     data_it = data_archivio.strftime("%d/%m/%Y")
     totale = len(risultati)
@@ -351,7 +492,14 @@ def build_message(data_archivio, risultati):
             for r in non_determinati:
                 righe.append(f"• {descrizione(r)} ({r['file']})")
 
-    for riga in (_riga_durezza(risultati), _riga_solventi(risultati)):
+    blocchi = (
+        _riga_batteriologico(risultati),
+        _riga_durezza(risultati),
+        _riga_solventi(risultati),
+        _riga_nitrati(risultati),
+        _riga_margine(risultati),
+    )
+    for riga in blocchi:
         if riga:
             righe.append("")
             righe.append(riga)

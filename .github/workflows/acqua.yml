@@ -7,6 +7,11 @@ on:
     # un aggiornamento senza sovraccaricare il sito con richieste inutili.
     - cron: '0 8 * * *'
   workflow_dispatch:
+    inputs:
+      forza_controllo:
+        description: 'Ripubblica l''ultimo archivio anche se già processato (per verificare a mano un cambio di formato)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # per salvare stato_acqua.json (ultimo archivio processato)
@@ -35,6 +40,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_CHAT_ID_TEST: ${{ secrets.TELEGRAM_CHAT_ID_TEST }}
           ACQUA_AMBIENTE: ${{ vars.ACQUA_AMBIENTE }}
+          FORZA_CONTROLLO: ${{ github.event.inputs.forza_controllo }}
         run: python acqua.py
 
       - name: Salva lo stato dell'ultimo archivio processato

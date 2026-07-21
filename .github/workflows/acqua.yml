@@ -1,0 +1,50 @@
+name: Acqua Solofra
+
+on:
+  schedule:
+    # Una volta al giorno: gli archivi su solofraservizi.it escono circa
+    # una volta a settimana, un controllo giornaliero basta a non perdere
+    # un aggiornamento senza sovraccaricare il sito con richieste inutili.
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # per salvare stato_acqua.json (ultimo archivio processato)
+
+jobs:
+  acqua:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repository
+        uses: actions/checkout@v5
+
+      - name: Installa Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Installa unrar
+        run: sudo apt-get update -qq && sudo apt-get install -y unrar
+
+      - name: Installa dipendenze
+        run: pip install requests pypdf
+
+      - name: Controlla e pubblica se c'è un nuovo archivio
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID_TEST: ${{ secrets.TELEGRAM_CHAT_ID_TEST }}
+          ACQUA_AMBIENTE: ${{ vars.ACQUA_AMBIENTE }}
+        run: python acqua.py
+
+      - name: Salva lo stato dell'ultimo archivio processato
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -f stato_acqua.json ]; then
+            git add stato_acqua.json
+            git diff --staged --quiet || git commit -m "Aggiorna stato acqua [skip ci]"
+            git push
+          else
+            echo "stato_acqua.json non esiste ancora: nulla da salvare."
+          fi

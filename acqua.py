@@ -387,6 +387,13 @@ def main():
     chat_id = chat_destinazione(amb)
     print(f"Ambiente attivo: {amb.upper()}")
 
+    # FORZA_CONTROLLO=true salta il controllo "è già stato processato?" e
+    # ripubblica l'archivio più recente anche se è lo stesso di prima —
+    # serve per verificare a mano un cambio di formato del messaggio senza
+    # dover aspettare che esca un archivio realmente nuovo sul sito (vedi
+    # bollettino.py per lo stesso pattern sull'aria).
+    forza = os.environ.get("FORZA_CONTROLLO", "").strip().lower() == "true"
+
     html = fetch_pagina()
     trovato = trova_ultimo_archivio(html)
     if trovato is None:
@@ -397,10 +404,16 @@ def main():
          f"({url})")
 
     gia_processato = leggi_stato()
-    if gia_processato is not None and ultima_data <= gia_processato:
+    if not forza and gia_processato is not None \
+            and ultima_data <= gia_processato:
         print(f"Nessun archivio nuovo (ultimo processato: "
-             f"{gia_processato.isoformat()}). Nessun messaggio inviato.")
+             f"{gia_processato.isoformat()}). Nessun messaggio inviato. "
+             f"(Imposta FORZA_CONTROLLO=true per ripubblicarlo comunque "
+             f"in un lancio manuale.)")
         return
+    if forza:
+        print("FORZA_CONTROLLO attivo: ripubblico l'ultimo archivio anche "
+             "se già processato in precedenza.")
 
     risultati = scarica_ed_estrai_analizza(url)
     print(f"Analizzati {len(risultati)} referti.")

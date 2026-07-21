@@ -23,6 +23,18 @@ Non proviamo mai a dedurre un esito quando il testo non è chiaro: meglio
 segnalare "referto da controllare a mano" che sbagliare in un senso o
 nell'altro su un dato sanitario.
 
+Oltre all'esito, il messaggio riporta sempre due parametri "chiave" in
+forma AGGREGATA su tutti i punti (non ripetuti punto per punto, per non
+fare overload): durezza e i solventi industriali tetracloroetilene/
+tricloroetilene. Questi ultimi non vengono mai omessi anche quando il
+valore è irrilevante, perché sono stati storicamente un tema sensibile
+per l'acqua di Solofra — il silenzio su questo parametro specifico
+sarebbe più sospetto che informativo. Il D.Lgs. 18/2023 fissa un limite
+sulla SOMMA dei due (non su ognuno singolarmente), e non tutti i referti
+includono questo pannello analitico (vedi `_estrai_solventi`) — mai
+extrapolato quando assente. I numeri riportati nel messaggio sono sempre
+letti dal testo del referto, mai scritti a mano.
+
 Il servizio è dotato dello stesso selettore a TRE STATI degli altri servizi
 "delicati" (vedi funzione `ambiente()`):
   - "spento"     -> nessun messaggio, da nessuna parte
@@ -191,12 +203,48 @@ def _normalizza(testo):
     return re.sub(r"\s+", "", testo)
 
 
+def _num(s):
+    """'0,6' o '0.6' -> 0.6"""
+    return float(s.replace(",", "."))
+
+
+def _estrai_durezza(testo_una_riga):
+    """°F, parametro solo informativo: il D.Lgs. 18/2023 non fissa un
+    limite per la durezza (per questo la riga finisce con '-')."""
+    m = re.search(r"Durezza[^-]*?°F\s+\d+\s+(\d+)", testo_una_riga)
+    return int(m.group(1)) if m else None
+
+
+def _estrai_solventi(testo_una_riga):
+    """Tetracloroetilene + Tricloroetilene: il D.Lgs. 18/2023 fissa un
+    limite sulla SOMMA dei due (effetti considerati cumulativi), non su
+    ognuno singolarmente — per questo il referto ha una riga dedicata a
+    parte con la somma, ed è quella che leggiamo. Non tutti i referti
+    includono questo pannello (vedi docstring del modulo): None se assente,
+    mai un valore indovinato."""
+    m = re.search(
+        r"Tricloroetilene e Tetracloroetilene.*?µg/L\s+([\d.,]+)\s+"
+        r"(<\s*LdQ|[\d.,]+)\s+(\d+)",
+        testo_una_riga)
+    if not m:
+        return None
+    ldq, valore_grezzo, limite = m.groups()
+    sotto_ldq = "ldq" in valore_grezzo.lower().replace(" ", "")
+    return {
+        "ldq": _num(ldq),
+        "limite": int(limite),
+        "sotto_ldq": sotto_ldq,
+        "valore": None if sotto_ldq else _num(valore_grezzo),
+    }
+
+
 def analizza_pdf(path):
-    """Estrae luogo, punto di prelievo ed esito da un singolo referto.
-    'conforme' è True/False solo se il testo lo dichiara esplicitamente;
-    None se non troviamo la frase attesa — mai indovinato dai valori dei
-    singoli parametri (troppo eterogenei tra loro per un confronto
-    generico e affidabile)."""
+    """Estrae luogo, punto di prelievo, esito, durezza e solventi
+    (tetracloroetilene/tricloroetilene) da un singolo referto. 'conforme'
+    è True/False solo se il testo lo dichiara esplicitamente; None se non
+    troviamo la frase attesa — mai indovinato dai valori dei singoli
+    parametri (troppo eterogenei tra loro per un confronto generico e
+    affidabile)."""
     testo = "\n".join(p.extract_text() or "" for p in PdfReader(path).pages)
     testo_una_riga = re.sub(r"\s+", " ", testo)
     norm = _normalizza(testo)
@@ -218,6 +266,8 @@ def analizza_pdf(path):
         "luogo": m_luogo.group(1).strip() if m_luogo else None,
         "punto": m_punto.group(1).strip() if m_punto else None,
         "conforme": conforme,
+        "durezza": _estrai_durezza(testo_una_riga),
+        "solventi": _estrai_solventi(testo_una_riga),
     }
 
 
@@ -229,36 +279,68 @@ def descrizione(r):
     return r["luogo"] or r["punto"] or r["file"]
 
 
+def _riga_durezza(risultati):
+    valori = [r["durezza"] for r in risultati if r["durezza"] is not None]
+    if not valori:
+        return None
+    if min(valori) == max(valori):
+        gamma = f"{valori[0]} °F in tutti i punti"
+    else:
+        gamma = f"da {min(valori)} a {max(valori)} °F a seconda del punto"
+    return (f"\U0001F4A7 Durezza: {gamma} (nessun limite di legge per "
+           f"questo parametro, è solo informativo — utile per "
+           f"lavatrice/caldaia)")
+
+
+def _riga_solventi(risultati):
+    testati = [r for r in risultati if r["solventi"] is not None]
+    if not testati:
+        return None
+    totale = len(risultati)
+    limite = testati[0]["solventi"]["limite"]
+    non_sotto_ldq = [r for r in testati if not r["solventi"]["sotto_ldq"]]
+
+    if not non_sotto_ldq:
+        ldq = testati[0]["solventi"]["ldq"]
+        return (f"\U0001F9EA Solventi industriali (tetracloroetilene/"
+               f"tricloroetilene): presenza quasi impercettibile — sotto "
+               f"la soglia minima che il laboratorio riesce a misurare — "
+               f"nei {len(testati)}/{totale} punti dove viene testato. Il "
+               f"limite di legge è {limite} µg/L, qui il laboratorio non "
+               f"ne rileva nemmeno {ldq:g}.")
+
+    picco = max(r["solventi"]["valore"] for r in non_sotto_ldq)
+    return (f"\U0001F9EA Solventi industriali (tetracloroetilene/"
+           f"tricloroetilene): rilevati (non solo tracce) in "
+           f"{len(non_sotto_ldq)}/{len(testati)} punti testati, valore "
+           f"più alto {picco:g} µg/L (limite di legge {limite} µg/L).")
+
+
 def build_message(data_archivio, risultati):
     data_it = data_archivio.strftime("%d/%m/%Y")
     totale = len(risultati)
     non_conformi = [r for r in risultati if r["conforme"] is False]
     non_determinati = [r for r in risultati if r["conforme"] is None]
     conformi = totale - len(non_conformi) - len(non_determinati)
-
     tutto_ok = not non_conformi and not non_determinati
 
+    icona = "✅" if tutto_ok else ("\U0001F534" if non_conformi
+                                  else "\U0001F7E1")
+    righe = [
+        f"\U0001F4A7 <b>Come sta Solofra</b> — acqua potabile",
+        f"Controllo del {data_it}",
+        "",
+    ]
+
     if tutto_ok:
-        righe = [
-            f"\U0001F4A7 <b>Come sta Solofra</b> — acqua potabile",
-            f"Controllo del {data_it}",
-            "",
-            f"✅ Tutti i {totale} punti di prelievo controllati sono "
-            f"conformi al D.Lgs. 18/2023.",
-        ]
+        righe.append(f"{icona} Tutti i {totale} punti di prelievo "
+                     f"controllati sono conformi al D.Lgs. 18/2023.")
     else:
-        icona = "\U0001F534" if non_conformi else "\U0001F7E1"
-        righe = [
-            f"{icona} <b>Come sta Solofra</b> — acqua potabile",
-            f"Controllo del {data_it}",
-            "",
-            f"{conformi}/{totale} punti di prelievo conformi al D.Lgs. "
-            f"18/2023.",
-        ]
+        righe.append(f"{icona} {conformi}/{totale} punti di prelievo "
+                     f"conformi al D.Lgs. 18/2023.")
         if non_conformi:
             righe.append("")
-            righe.append(f"⚠️ <b>NON conformi "
-                         f"({len(non_conformi)}):</b>")
+            righe.append(f"⚠️ <b>NON conformi ({len(non_conformi)}):</b>")
             for r in non_conformi:
                 righe.append(f"• {descrizione(r)}")
         if non_determinati:
@@ -269,13 +351,17 @@ def build_message(data_archivio, risultati):
             for r in non_determinati:
                 righe.append(f"• {descrizione(r)} ({r['file']})")
 
+    for riga in (_riga_durezza(risultati), _riga_solventi(risultati)):
+        if riga:
+            righe.append("")
+            righe.append(riga)
+
     righe.append("")
-    righe.append(f"Referti completi: {PAGINA_URL}")
-    righe.append("Fonte: Solofra Servizi S.p.A. — laboratorio "
-                 "accreditato terzo.")
-    righe.append("<i>Non è un canale ufficiale: per informazioni e "
-                 "reclami sull'erogazione fai riferimento a Solofra "
-                 "Servizi S.p.A.</i>")
+    righe.append(f"Fonte: rapporti di un laboratorio accreditato terzo, "
+                 f"referti del {data_it}.")
+    righe.append(f"⚠️ <i>Servizio gratuito e non ufficiale, può contenere "
+                 f"errori di lettura automatica dei referti. Dati "
+                 f"ufficiali e referti completi: {PAGINA_URL}</i>")
     return "\n".join(righe)
 
 

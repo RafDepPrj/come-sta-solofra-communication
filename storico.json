@@ -1,23 +1,5 @@
 [
  {
-  "ts": "2026-07-13T08:32+02:00",
-  "aqi": 34,
-  "banda": "BUONA",
-  "nearby": {
-   "Avellino": 22,
-   "Salerno": 29
-  }
- },
- {
-  "ts": "2026-07-13T10:16+02:00",
-  "aqi": 28,
-  "banda": "BUONA",
-  "nearby": {
-   "Avellino": 22,
-   "Salerno": 25
-  }
- },
- {
   "ts": "2026-07-13T14:03+02:00",
   "aqi": 39,
   "banda": "BUONA",
@@ -789,6 +771,15 @@
   "nearby": {
    "Avellino": 29,
    "Salerno": 57
+  }
+ },
+ {
+  "ts": "2026-07-22T11:13+02:00",
+  "aqi": 44,
+  "banda": "BUONA",
+  "nearby": {
+   "Avellino": 17,
+   "Salerno": 46
   }
  }
 ]

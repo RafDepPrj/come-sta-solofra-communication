@@ -1,14 +1,5 @@
 [
  {
-  "ts": "2026-07-14T11:52+02:00",
-  "aqi": 64,
-  "banda": "ACCETTABILE",
-  "nearby": {
-   "Avellino": 27,
-   "Salerno": 56
-  }
- },
- {
   "ts": "2026-07-14T13:42+02:00",
   "aqi": 100,
   "banda": "ACCETTABILE",
@@ -780,6 +771,15 @@
   "nearby": {
    "Avellino": 16,
    "Salerno": 17
+  }
+ },
+ {
+  "ts": "2026-07-23T13:28+02:00",
+  "aqi": 37,
+  "banda": "BUONA",
+  "nearby": {
+   "Avellino": 20,
+   "Salerno": 34
   }
  }
 ]

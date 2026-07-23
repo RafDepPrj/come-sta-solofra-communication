@@ -1,41 +1,5 @@
 [
  {
-  "ts": "2026-07-14T13:42+02:00",
-  "aqi": 100,
-  "banda": "ACCETTABILE",
-  "nearby": {
-   "Avellino": 30,
-   "Salerno": 75
-  }
- },
- {
-  "ts": "2026-07-14T13:52+02:00",
-  "aqi": 100,
-  "banda": "ACCETTABILE",
-  "nearby": {
-   "Avellino": 30,
-   "Salerno": 75
-  }
- },
- {
-  "ts": "2026-07-14T13:56+02:00",
-  "aqi": 100,
-  "banda": "INSALUBRE PER I SENSIBILI",
-  "nearby": {
-   "Avellino": 30,
-   "Salerno": 75
-  }
- },
- {
-  "ts": "2026-07-14T16:27+02:00",
-  "aqi": 64,
-  "banda": "ACCETTABILE",
-  "nearby": {
-   "Avellino": 53,
-   "Salerno": 58
-  }
- },
- {
   "ts": "2026-07-14T17:54+02:00",
   "aqi": 66,
   "banda": "ACCETTABILE",
@@ -780,6 +744,15 @@
   "nearby": {
    "Avellino": 20,
    "Salerno": 34
+  }
+ },
+ {
+  "ts": "2026-07-23T17:26+02:00",
+  "aqi": 39,
+  "banda": "BUONA",
+  "nearby": {
+   "Avellino": 19,
+   "Salerno": 29
   }
  }
 ]
